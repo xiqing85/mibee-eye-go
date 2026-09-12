@@ -1,0 +1,241 @@
+# Example configuration — copy to config.yaml and adjust for your setup
+# MiBee Eye configuration
+# RPi 3B + OV5647 (Pi Camera V1) defaults
+
+# Camera capture settings
+camera:
+  # Camera device path (V4L2 or libcamera)
+  device: /dev/video0
+  # Capture mode: "mtxrpicam" (default, uses subprocess), "rpicamvid" (system rpicam-vid), or "rtsp" (consumes external RTSP URL)
+  mode: mtxrpicam
+
+  # External RTSP URL when mode=rtsp (ignored when mode=mtxrpicam)
+  rtsp_url: ""
+
+  # Capture resolution (width x height)
+  # Supported: 640x480, 1296x972, 1920x1080, 2592x1944
+  width: 1280
+  height: 720
+
+  # Frames per second (max 30 for OV5647)
+  fps: 15
+
+  # Video codec (h264, h265)
+  codec: h264
+
+  # Target bitrate in bits per second (2 Mbps)
+  bitrate: 2000000
+
+  # Image controls (OV5647 hardware ranges):
+  # Brightness: -1.0 to 1.0 (0.0 = default)
+  brightness: 0.0
+
+  # Contrast: 0.0 to 32.0 (1.0 = default)
+  contrast: 1.0
+
+  # Saturation: 0.0 to 32.0 (1.0 = default)
+  saturation: 1.0
+
+  # Sharpness: 0.0 to 16.0 (1.0 = default)
+  sharpness: 1.0
+
+  # Keyframe interval (1=every frame, 15=every 15th frame)
+  idr_period: 15
+
+  # Path to mtxrpicam binary
+  bin_path: deploy/bin/mtxrpicam
+
+  # Frame channel buffer capacity (frames)
+  frame_buffer_size: 30
+
+  # Maximum subprocess restart backoff duration
+  max_backoff: 30s
+
+# RTSP server settings
+rtsp:
+  # RTSP port (MediaMTX default: 8554)
+  port: 8554
+
+  # Optional RTSP authentication (leave empty for no auth)
+  username: ""
+  password: ""
+
+  # AUHub subscriber channel buffer size
+  subscriber_buffer_size: 64
+
+  # gortsplib write queue size (256 default too small for WiFi)
+  write_queue_size: 2048
+
+  # Enable UDP transport (default: true, needed for NVR clients)
+  enable_udp: true
+
+  # UDP RTP port (default: 8000)
+  udp_rtp_port: 8000
+
+  # UDP RTCP port (default: 8001)
+  udp_rtcp_port: 8001
+
+# ONVIF server settings
+onvif:
+  # ONVIF HTTP port for SOAP/WS-Discovery
+  port: 8080
+
+  # WS-UsernameToken credentials used by MiBee NVR
+  username: "admin"
+  password: ""  # REQUIRED: set your ONVIF password
+
+# ONVIF device information (exposed via GetDeviceInformation)
+device:
+  # Friendly camera name
+  name: "Pi Camera V1"
+
+  # Device manufacturer
+  manufacturer: "Raspberry Pi"
+
+  # Camera sensor model
+  model: "OV5647"
+
+  # Firmware version string
+  firmware: "1.0.0"
+
+  # Hardware identifier
+  hardware_id: "OV5647"
+
+  # Device serial number
+  serial_number: ""
+
+# Logging settings
+logging:
+  # Log level: debug, info, warn, error
+  level: "info"
+
+# Web UI settings
+web:
+  # Enable Web UI server (admin panel on port 8088 by default)
+  enabled: true
+
+  # Web UI HTTP port (separate from ONVIF :8080 and RTSP :8554)
+  port: 8088
+
+  # HTTP Basic auth credentials. Leave empty to mirror ONVIF credentials
+  # (i.e. web.Username = onvif.Username, web.Password = onvif.Password).
+  username: ""
+  password: ""
+
+  # CORS allowed origins (use specific origins in production)
+  allowed_origins:
+    - "*"
+
+  # HTTP server timeouts (leave at 0 for defaults)
+  read_header_timeout: 5s
+  read_timeout: 10s
+  write_timeout: 30s
+  idle_timeout: 120s
+
+# RTMP push settings (disabled by default)
+rtmp:
+  # Enable RTMP push to remote server
+  enabled: false
+  # RTMP server URL (e.g. rtmp://your-server.com/live/streamkey)
+  url: ""
+  # Maximum reconnection attempts (0 = unlimited)
+  max_retries: 10
+
+# Snapshot settings
+snapshot:
+  # Enable the snapshot HTTP endpoint (default: true)
+  enabled: true
+
+  # JPEG quality 1-100 (only used for rpicam-still subprocess; H.264 IDR fallback ignores this)
+  quality: 85
+
+# HLS live streaming settings (disabled by default)
+hls:
+  # Enable HLS server for browser playback (pure Go MPEG-TS segmenter, no ffmpeg)
+  enabled: false
+
+  # Target segment duration
+  segment_duration: 2s
+
+# Metrics settings
+metrics:
+  # Enable Prometheus metrics HTTP endpoint
+  enabled: true
+
+  # Metrics HTTP port (default: 9100, conflicts with Prometheus node_exporter)
+  port: 9100
+
+# GB28181 SIP registration settings (disabled by default)
+gb28181:
+  # Enable GB28181 registration with a SIP platform (default: false)
+  enabled: false
+
+  # SIP server (platform) address
+  platform_sip_address: "192.168.1.1"
+
+  # SIP server (platform) port
+  platform_sip_port: 5060
+
+  # GB28181 device ID (20 digits)
+  device_id: "34020000001320000001"
+
+  # GB28181 channel ID (20 digits)
+  channel_id: "34020000001320000001"
+
+  # GB28181 SIP domain
+  sip_domain: "3402000000"
+
+  # SIP authentication password — REQUIRED when gb28181.enabled
+  # (the service refuses to start with an empty password; no default)
+  password: ""
+
+  # Local SIP listening port
+  local_sip_port: 5060
+
+  # SIP REGISTER interval in seconds
+  register_interval_secs: 60
+
+  # SIP keepalive heartbeat interval in seconds
+  heartbeat_interval_secs: 60
+
+  # Missed heartbeats before declaring the platform unreachable
+  heartbeat_timeout_count: 3
+
+# Local continuous recording settings (disabled by default)
+# Segments are bare H.264 files at recordings/YYYY-MM-DD/HH/MMSS.h264
+# plus an append-only recordings/index.jsonl consumed by GB28181 RecordInfo
+# and Playback/Download INVITE streaming.
+recording:
+  # Enable continuous local recording
+  enabled: false
+
+  # Recording root directory
+  storage_path: "recordings"
+
+  # Target segment duration in seconds (default: 600)
+  segment_secs: 600
+
+  # Delete segments older than this many days (0 = infinite)
+  retention_days: 3
+
+  # Prune oldest segments above this cap in MB (0 = unlimited)
+  max_storage_mb: 8192
+
+# On-device AI object detection (SPEC v1 §4.6; disabled by default).
+# Same NanoDet-Plus model and semantics as the raspi-rs camera. The binary
+# must be built with `-tags ai` (CGO + zig cross-compile; see AGENTS.md) —
+# otherwise the feature reports unavailable and ai stays off (fail-open).
+# Requires ffmpeg on the device (keyframe-only decode; ~5% CPU on Pi 3B)
+# and libonnxruntime.so + the model file at the paths below.
+ai:
+  enabled: false
+  model_path: /var/lib/mibee-eye/models/nanodet-m.onnx
+  onnx_lib_path: /usr/local/lib/libonnxruntime.so
+  # Report detections at/above this confidence (0..1].
+  confidence_threshold: 0.35
+  # Minimum spacing between inferences. Effective cadence is also bounded
+  # by the camera keyframe interval (camera.idr_period) — AI decodes
+  # keyframes only.
+  interval_ms: 1000
+  # ffmpeg binary used to decode H.264 keyframes to RGB.
+  decoder_bin: ffmpeg

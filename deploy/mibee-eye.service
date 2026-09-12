@@ -1,0 +1,21 @@
+[Unit]
+Description=MiBee Eye - ONVIF Camera Server
+After=network.target
+# Deliberate self-restarts (config save; imaging flips bake into the
+# pipeline via restart — SPEC 附录A #9) must not trip the rate limiter.
+StartLimitIntervalSec=180
+StartLimitBurst=10
+Conflicts=mediamtx.service
+
+[Service]
+Type=simple
+User=pi
+Environment=LD_LIBRARY_PATH=/home/pi/mibee-eye/deploy/bin
+Environment=LIBCAMERA_IPA_CONFIG_PATH=/usr/share/libcamera/ipa
+WorkingDirectory=/home/pi/mibee-eye
+ExecStart=/home/pi/mibee-eye/mibee-eye -config /home/pi/mibee-eye/config.yaml
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,14 @@
+MiBee Eye (Go) — mibee-eye-raspi-go
+Copyright (c) 2026 MiBee Eye contributors
+
+The original code in this repository is licensed under the
+Creative Commons Attribution-NonCommercial 4.0 International
+(CC BY-NC 4.0) — see LICENSE. Commercial use is not permitted.
+
+Third-party components keep their own licenses:
+
+Portions of this software (notably internal/camera/*.go) are derived
+from MediaMTX. MediaMTX is Copyright (c) bluenviron and contributors.
+MediaMTX is distributed under the MIT License.
+Source: https://github.com/bluenviron/mediamtx
+These portions remain under the MIT License.
