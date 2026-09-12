@@ -1,0 +1,52 @@
+version: 2
+
+builds:
+  - main: ./cmd/server/main.go
+    binary: mibee-eye
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+changelog:
+  use: github
+  sort: asc
+  groups:
+    - title: "✨ Features"
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
+      order: 0
+    - title: "🐛 Bug Fixes"
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
+      order: 1
+    - title: "💥 Breaking Changes"
+      regexp: '^.*?(\w+)!:.+$'
+      order: 2
+    - title: "📦 Others"
+      order: 999
+  filters:
+    exclude:
+      - '^docs:'
+      - '^chore:'
+      - '^ci:'
+      - '^style:'
+      - '^test:'
+      - '^refactor:'
+      - 'Merge pull request'
+      - 'go mod tidy'
+
+checksum:
+  name_template: "checksums.txt"
+
+release:
+  github:
+    owner: xiqing85
+    name: mibee-eye-raspi-go
