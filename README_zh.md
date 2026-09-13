@@ -19,6 +19,23 @@
 
 MiBee Eye 是一个轻量级的 Go ONVIF 相机服务，支持树莓派、香蕉派、香橙派等单板计算机，兼容所有 CSI/USB 摄像头。它提供 ONVIF 设备/媒体/成像服务、RTSP 流媒体、RTMP 推流、WS-Discovery、GB28181 国标接入与内嵌 SPEC v1 Web 管理界面，用于 NVR/VMS 集成。
 
+这是 MiBee Eye 的 **Go 实现**。另有一个面向极致受限板子的兄弟 [Rust 实现](https://github.com/xiqing85/mibee-eye-raspi-rs)，见[我该选哪个实现？](#我该选哪个实现)。
+
+## 我该选哪个实现？
+
+两个实现说同样的协议（ONVIF Profile S、GB28181、RTSP、RTMP）、共享同一套
+SPEC v1 Web UI/API、对接同样的 NVR —— 按部署画像选择：
+
+| 选 **Go 实现**，当你… | 选 **Rust 实现**，当你… |
+|---|---|
+| 想最快跑起来：零 CGO 构建、原生交叉编译 | 板子内存/闪存吃紧（~2 MB 二进制、6–12 MB 内存） |
+| 需要开箱即用的 HLS 浏览器播放 | 需要把 OSD 水印烧录进每一路输出 |
+| 需要 i18n 界面或运行指标 API | 要求采集+编码全程进程内（无采集子进程） |
+| 更想在 Go 代码上动手 | 更想在 Rust 代码上动手 |
+
+两者共有：AI 检测（NanoDet，可选）· GB 35114 A 级（可选）· 连续录像 + GB28181
+回放 · 图像调节 · 快照。
+
 ## 功能
 
 - **ONVIF 设备/媒体/成像服务** - 完全符合 ONVIF Profile S，支持 NVR 集成，基于 [onvif-go/v2](https://github.com/mickeyzzc/onvif-go)
@@ -205,16 +222,22 @@ sequenceDiagram
     P->>C: SIP INFO（暂停 / 继续 / 拖动 / 倍速）
 ```
 
-### 与 MediaMTX 性能对比
+### vs 在树莓派上用 MediaMTX 当相机源
 
-| 指标 | MiBee Eye | MediaMTX | 提升 |
-|------|-----------|----------|------|
-| 内存占用 | **15–25 MB** | ~45 MB | 降低 45–67% |
-| ONVIF 服务 | ✅ **Profile S**（设备/媒体/成像） | ❌ 不支持 | — |
-| CGO 依赖 | **零** | 需要 CGO | 交叉编译无痛 |
-| 相机控制 | ✅ 亮度、对比度、白平衡等 | ❌ 无 | — |
-| RTMP 推流 | ✅ 内置 | ❌ 需额外配置 | — |
-| CPU 占用（720p@15fps） | ~15% | ~24% | 降低 37% |
+MediaMTX 是优秀的媒体*服务器*（NVR/中继侧）—— 它本身也是纯 Go、零 CGO 项目。
+下表只比较**相机侧**角色：把“树莓派 + CSI 摄像头”变成可被 NVR 发现并拉流的
+ONVIF/GB28181 设备。
+
+| 相机侧能力 | MiBee Eye | MediaMTX |
+|------------|-----------|----------|
+| ONVIF 设备服务（Profile S） | ✅ 设备/媒体/成像 | ❌（非其定位） |
+| GB28181 设备端 | ✅ | ❌ |
+| 相机图像调节 | ✅ 亮度/对比度/白平衡等 | ❌ |
+| RTMP 推流 | ✅ 内置 | ⚠️ 可实现，媒体服务器风格 |
+| 内存（RPi 3B，720p@15fps） | ~15–25 MB | ~45 MB（参考值） |
+
+来自我们 RPi 3B 部署的参考值 —— 可用
+[`bench/rpi-bench.sh`](bench/rpi-bench.sh) 在自己的板子上复测。
 
 ### 技术栈
 
@@ -227,7 +250,7 @@ sequenceDiagram
 | 相机采集 | `mtxrpicam` / `rpicam-vid` 子进程 | 久经考验的 libcamera，零 CGO |
 | HLS 桥接 | 纯 Go MPEG-TS 分段器 | 无外部依赖，轻量 |
 | AI 检测 | `onnxruntime_go` + ffmpeg 关键帧解码 | ONNX 运行库动态加载，按关键帧节奏检测 |
-| Web 界面 | 内嵌 [mibee-webui](https://github.com/Mi-Bee-Studio/mibee-webui) + hls.js | 零构建 ES Modules，能力门控渲染 |
+| Web 界面 | 内嵌零构建 ES Modules UI + hls.js | 能力门控渲染，无外部依赖 |
 | 配置 | YAML | 可读性好，部署简单 |
 
 默认构建为纯 Go —— **零 CGO**。所有协议（ONVIF、GB28181、RTSP、RTMP、HLS、
@@ -267,5 +290,8 @@ make deploy REMOTE_HOST=user@your-rpi-host
 
 ## 许可证
 
-CC BY-NC 4.0（非商业性使用，禁止商用）—— 详见 [LICENSE](LICENSE)。
+源代码许可为 **CC BY-NC 4.0（非商业性使用，禁止商用）**—— 详见 [LICENSE](LICENSE)。
 MediaMTX 衍生部分（internal/camera）沿用 MIT，见 [NOTICE](NOTICE)。
+
+**商业授权** —— 用于商业产品或部署需另行获得作者授权；
+请开标题前缀为 `[commercial-license]` 的 issue 联系。
