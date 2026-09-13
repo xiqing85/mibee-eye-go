@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/xiqing85/mibee-eye-raspi-go/actions/workflows/ci.yml/badge.svg)](https://github.com/xiqing85/mibee-eye-raspi-go/actions/workflows/ci.yml)
 [![Go Version](https://img.shields.io/badge/go-1.26-blue.svg)](https://golang.org)
-[![License: CC BY-NC 4.0](https://img.shields.io/badge/License-CC_BY--NC--4.0-lightgrey.svg)](LICENSE)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
 [English](README.md)
 
@@ -17,7 +17,9 @@
 </div>
 
 
-MiBee Eye 是一个轻量级的 Go ONVIF 相机服务，支持树莓派、香蕉派、香橙派等单板计算机，兼容所有 CSI/USB 摄像头。它提供 ONVIF 设备/媒体/成像服务、RTSP 流媒体、RTMP 推流、WS-Discovery、GB28181 国标接入与内嵌 SPEC v1 Web 管理界面，用于 NVR/VMS 集成。
+MiBee Eye 是一个轻量级的 Go ONVIF 相机服务，面向树莓派（CSI 相机，经 libcamera）。
+它也可以跑在任意 Linux 设备上做协议网关：`camera.mode: rtsp` 可把已有 RTSP 流
+变成 ONVIF/GB28181 设备 —— 见[支持的硬件](#支持的摄像头)。它提供 ONVIF 设备/媒体/成像服务、RTSP 流媒体、RTMP 推流、WS-Discovery、GB28181 国标接入与内嵌 SPEC v1 Web 管理界面，用于 NVR/VMS 集成。
 
 这是 MiBee Eye 的 **Go 实现**。另有一个面向极致受限板子的兄弟 [Rust 实现](https://github.com/xiqing85/mibee-eye-raspi-rs)，见[我该选哪个实现？](#我该选哪个实现)。
 
@@ -139,7 +141,7 @@ Web 界面通过 `//go:embed` 嵌入到二进制文件中，无需额外文件�
 | Pi Camera V2 | IMX219 | 3280×2464 | 固定焦 | `imx219` | 更好的低光性能 |
 | Pi Camera V3 | IMX708 | 4608×2592 | 自动对焦 | `imx708` | PDAF，HDR 支持 |
 | Pi HQ Camera | IMX477 | 4056×3040 | 手动镜头 | `imx477` | 可更换镜头 |
-| USB (UVC) | 各类 | 各类 | 各类 | 自动检测 | `/dev/video*` |
+| USB (UVC) | — | — | — | — | 不直接采集；若相机自身提供 RTSP，用 `camera.mode: rtsp` |
 
 ## 架构
 
@@ -290,8 +292,8 @@ make deploy REMOTE_HOST=user@your-rpi-host
 
 ## 许可证
 
-源代码许可为 **CC BY-NC 4.0（非商业性使用，禁止商用）**—— 详见 [LICENSE](LICENSE)。
+以 **Apache License, Version 2.0** 授权 —— 详见 [LICENSE](LICENSE)。
 MediaMTX 衍生部分（internal/camera）沿用 MIT，见 [NOTICE](NOTICE)。
 
-**商业授权** —— 用于商业产品或部署需另行获得作者授权；
-请开标题前缀为 `[commercial-license]` 的 issue 联系。
+> 许可历史：v0.1.0 曾以 CC BY-NC 4.0 发布；2026-09-13 起项目改为
+> Apache-2.0（唯一版权持有人变更）。
