@@ -4,7 +4,7 @@
 
 If you discover a security vulnerability in this project, please **report it via GitHub Issues**:
 
-1. Go to [Issues](https://github.com/xiqing85/mibee-eye-raspi-go/issues/new)
+1. Go to [Issues](https://github.com/xiqing85/mibee-eye-go/issues/new)
 2. Set the title prefix `[security]` and apply the `security` label
 3. Provide a clear description of the issue and steps to reproduce
 

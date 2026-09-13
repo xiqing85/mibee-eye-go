@@ -1,6 +1,6 @@
 # MiBee Eye (蜂眼)
 
-[![CI](https://github.com/xiqing85/mibee-eye-raspi-go/actions/workflows/ci.yml/badge.svg)](https://github.com/xiqing85/mibee-eye-raspi-go/actions/workflows/ci.yml)
+[![CI](https://github.com/xiqing85/mibee-eye-go/actions/workflows/ci.yml/badge.svg)](https://github.com/xiqing85/mibee-eye-go/actions/workflows/ci.yml)
 [![Go Version](https://img.shields.io/badge/go-1.26-blue.svg)](https://golang.org)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
@@ -17,12 +17,12 @@
 </div>
 
 
-MiBee Eye is a lightweight Go ONVIF camera service for Raspberry Pi (CSI
-cameras via libcamera). It also runs on any Linux box as a protocol gateway:
+MiBee Eye is a lightweight Go ONVIF camera service for any Linux board (Pi CSI
+cameras via libcamera, USB/UVC via the v4l2 mode). It also runs on any Linux box as a protocol gateway:
 with `camera.mode: rtsp` it turns an existing RTSP stream into an
 ONVIF/GB28181 device — see [Supported hardware](#supported-hardware). It provides ONVIF Device/Media/Imaging services, RTSP streaming, RTMP push, WS-Discovery, GB28181 device integration, and an embedded SPEC v1 web admin UI — for NVR/VMS integration.
 
-This is the **Go implementation** of MiBee Eye. A sibling [Rust implementation](https://github.com/xiqing85/mibee-eye-raspi-rs) targets the most constrained boards — see [Which implementation should I use?](#which-implementation-should-i-use).
+This is the **Go implementation** of MiBee Eye. A sibling [Rust implementation](https://github.com/xiqing85/mibee-eye-rs) targets the most constrained boards — see [Which implementation should I use?](#which-implementation-should-i-use).
 
 **Runs on any Linux board** — three capture profiles: Pi CSI cameras via
 libcamera (`mtxrpicam`/`rpicamvid`), any V4L2/USB-UVC camera via the generic
@@ -67,7 +67,7 @@ recording with GB28181 playback · imaging controls · snapshot.
 
 ```bash
 # Clone and build
-git clone https://github.com/xiqing85/mibee-eye-raspi-go
+git clone https://github.com/xiqing85/mibee-eye-go
 cd mibee-eye-raspi-go
 make build
 
