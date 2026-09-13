@@ -145,10 +145,10 @@ func WithInfo(info CameraInfo) RPiCameraOption {
 // NewRPiCamera creates a new RPiCamera with the given options.
 func NewRPiCamera(opts ...RPiCameraOption) *RPiCamera {
 	c := &RPiCamera{
-		params:           DefaultParams(),
-		binPath:          filepath.Join("deploy", "bin", "mtxrpicam"),
-		frameBufferSize:  30,
-		maxBackoff:       30 * time.Second,
+		params:          DefaultParams(),
+		binPath:         filepath.Join("deploy", "bin", "mtxrpicam"),
+		frameBufferSize: 30,
+		maxBackoff:      30 * time.Second,
 		info: CameraInfo{
 			Name:         "RPi Camera",
 			Manufacturer: "Raspberry Pi",
@@ -444,7 +444,7 @@ func (c *RPiCamera) cleanupSubprocessLocked() {
 	if c.confPipe != nil {
 		if closer, ok := c.confPipe.writer.(interface{ Close() error }); ok {
 			if err := closer.Close(); err != nil {
-			slog.Debug("camera: cleanup confPipe error", "err", err)
+				slog.Debug("camera: cleanup confPipe error", "err", err)
 			}
 		}
 		c.confPipe = nil
@@ -453,7 +453,7 @@ func (c *RPiCamera) cleanupSubprocessLocked() {
 	if c.videoPipe != nil {
 		if closer, ok := c.videoPipe.reader.(interface{ Close() error }); ok {
 			if err := closer.Close(); err != nil {
-			slog.Debug("camera: cleanup videoPipe error", "err", err)
+				slog.Debug("camera: cleanup videoPipe error", "err", err)
 			}
 		}
 		c.videoPipe = nil
@@ -462,10 +462,10 @@ func (c *RPiCamera) cleanupSubprocessLocked() {
 	if c.cmd != nil && c.cmd.Process != nil {
 		if err := c.cmd.Process.Kill(); err != nil {
 			slog.Debug("camera: kill subprocess error", "err", err)
-			}
-			if err := c.cmd.Wait(); err != nil {
+		}
+		if err := c.cmd.Wait(); err != nil {
 			slog.Debug("camera: wait subprocess error", "err", err)
-			}
+		}
 		c.cmd = nil
 	}
 }

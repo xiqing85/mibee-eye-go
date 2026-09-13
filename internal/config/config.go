@@ -14,8 +14,11 @@ import (
 
 // CameraConfig holds camera capture settings.
 type CameraConfig struct {
-	Device          string        `yaml:"device"`            // Camera device path
-	Mode            string        `yaml:"mode"`              // Capture mode: "mtxrpicam" (default), "rpicamvid", or "rtsp"
+	Device string `yaml:"device"` // Camera device path
+	Mode   string `yaml:"mode"`   // Capture mode: "mtxrpicam" (default), "rpicamvid", "rtsp", or "v4l2"
+	// EncoderDevice is the V4L2 M2M encoder node probed by the v4l2
+	// camera mode (bcm2835-codec-encode on Pi; configure per SoC).
+	EncoderDevice   string        `yaml:"encoder_device"`
 	RTSPURL         string        `yaml:"rtsp_url"`          // External RTSP URL when mode=rtsp
 	Width           int           `yaml:"width"`             // Capture width in pixels
 	Height          int           `yaml:"height"`            // Capture height in pixels
@@ -186,6 +189,7 @@ func DefaultConfig() *Config {
 		Camera: CameraConfig{
 			Device:          "/dev/video0",
 			Mode:            "mtxrpicam",
+			EncoderDevice:   "/dev/video11",
 			RTSPURL:         "",
 			Width:           1280,
 			Height:          720,
@@ -320,6 +324,8 @@ func Load(path string) (*Config, error) {
 func applyEnvOverrides(cfg *Config) {
 	// Camera section
 	overrideString("MIBEE_EYE_CAMERA_DEVICE", &cfg.Camera.Device)
+	overrideString("MIBEE_EYE_CAMERA_MODE", &cfg.Camera.Mode)
+	overrideString("MIBEE_EYE_CAMERA_ENCODER_DEVICE", &cfg.Camera.EncoderDevice)
 	overrideInt("MIBEE_EYE_CAMERA_WIDTH", &cfg.Camera.Width)
 	overrideInt("MIBEE_EYE_CAMERA_HEIGHT", &cfg.Camera.Height)
 	overrideInt("MIBEE_EYE_CAMERA_FPS", &cfg.Camera.FPS)
@@ -447,6 +453,11 @@ func (c *Config) Validate() error {
 	}
 	if c.Camera.Sharpness < 0.0 || c.Camera.Sharpness > 16.0 {
 		return fmt.Errorf("config.camera.sharpness: %w", fmt.Errorf("out of range [0.0, 16.0]"))
+	}
+	switch c.Camera.Mode {
+	case "mtxrpicam", "rpicamvid", "rtsp", "v4l2":
+	default:
+		return fmt.Errorf("config.camera.mode: must be one of mtxrpicam|rpicamvid|rtsp|v4l2, got %q", c.Camera.Mode)
 	}
 	if c.Camera.Codec != "h264" && c.Camera.Codec != "h265" {
 		return fmt.Errorf("config.camera.codec: %w", errInvalidCodec)
