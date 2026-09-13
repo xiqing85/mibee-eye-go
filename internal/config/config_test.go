@@ -71,6 +71,9 @@ logging: {}
 	if cfg.Camera.VFlip {
 		t.Error("Camera.VFlip default = true, want false")
 	}
+	if cfg.Camera.EncoderDevice != "/dev/video11" {
+		t.Errorf("Camera.EncoderDevice default = %q, want /dev/video11", cfg.Camera.EncoderDevice)
+	}
 
 	// RTSP defaults
 	if cfg.RTSP.Port != 8554 {
@@ -420,6 +423,46 @@ func TestValidateValidConfig(t *testing.T) {
 	err := cfg.Validate()
 	if err != nil {
 		t.Errorf("DefaultConfig() should be valid, got: %v", err)
+	}
+}
+
+func TestValidateInvalidCameraMode(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Camera.Mode = "quantum"
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("invalid camera.mode must fail validation")
+	} else if !strings.Contains(err.Error(), "camera.mode") {
+		t.Fatalf("error should mention camera.mode, got: %v", err)
+	}
+}
+
+func TestValidateAllCameraModesAccepted(t *testing.T) {
+	for _, mode := range []string{"mtxrpicam", "rpicamvid", "rtsp", "v4l2"} {
+		cfg := DefaultConfig()
+		cfg.Camera.Mode = mode
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("mode %q should validate: %v", mode, err)
+		}
+	}
+}
+
+func TestEncoderDeviceDefault(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.Camera.EncoderDevice != "/dev/video11" {
+		t.Errorf("Camera.EncoderDevice default = %q, want /dev/video11", cfg.Camera.EncoderDevice)
+	}
+}
+
+func TestEnvOverrideCameraModeAndEncoderDevice(t *testing.T) {
+	t.Setenv("MIBEE_EYE_CAMERA_MODE", "v4l2")
+	t.Setenv("MIBEE_EYE_CAMERA_ENCODER_DEVICE", "/dev/video31")
+	cfg := DefaultConfig()
+	applyEnvOverrides(cfg)
+	if cfg.Camera.Mode != "v4l2" {
+		t.Errorf("Mode = %q, want v4l2", cfg.Camera.Mode)
+	}
+	if cfg.Camera.EncoderDevice != "/dev/video31" {
+		t.Errorf("EncoderDevice = %q, want /dev/video31", cfg.Camera.EncoderDevice)
 	}
 }
 

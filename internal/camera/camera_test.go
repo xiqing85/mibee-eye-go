@@ -230,7 +230,6 @@ func TestParamsSerializeBoolField(t *testing.T) {
 	}
 }
 
-
 func TestSerializeUnsupportedType(t *testing.T) {
 	// Params only has uint32/float32/string/bool fields (all valid),
 	// so we test the kind-check logic with a struct containing an unsupported int field.

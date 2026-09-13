@@ -23,6 +23,11 @@ MiBee Eye 是一个轻量级的 Go ONVIF 相机服务，面向树莓派（CSI �
 
 这是 MiBee Eye 的 **Go 实现**。另有一个面向极致受限板子的兄弟 [Rust 实现](https://github.com/xiqing85/mibee-eye-raspi-rs)，见[我该选哪个实现？](#我该选哪个实现)。
 
+**任意 Linux 板可跑** —— 三种采集画像：树莓派 CSI 相机走 libcamera
+（`mtxrpicam`/`rpicamvid`）；任意 V4L2/USB-UVC 相机走通用 `v4l2` 模式
+（`camera.encoder_device` 探测到 M2M 编码器则硬编，否则常驻 ffmpeg 子进程
+软编）；`rtsp` 模式把外部 RTSP 流重新发布为 ONVIF/GB28181 设备。
+
 ## 我该选哪个实现？
 
 两个实现说同样的协议（ONVIF Profile S、GB28181、RTSP、RTMP）、共享同一套
@@ -82,7 +87,8 @@ sudo systemctl enable --now mibee-eye
 
 查看 `configs/config.example.yaml` 了解所有配置选项。主要设置包括：
 
-- `camera.mode` - 采集模式：`mtxrpicam`（子进程管道）、`rpicamvid`（系统 rpicam-vid）或 `rtsp`（拉取 RTSP 源）
+- `camera.mode` - 采集模式：`mtxrpicam`（树莓派 CSI 子进程管道）、`rpicamvid`（系统 rpicam-vid）、`rtsp`（拉取 RTSP 源）或 `v4l2`（通用 V4L2 采集 —— 任意板、含 USB/UVC）
+- `camera.encoder_device` - `v4l2` 模式探测的 V4L2 M2M 编码节点（默认 `/dev/video11` 即 bcm2835-codec；缺失或非 M2M 时回退 ffmpeg 子进程）
 - `camera.width/height` - 采集分辨率（默认 1280x720）
 - `camera.fps` - 每秒帧数（树莓派 3B 默认 15）
 - `camera.bitrate` - 视频码率（比特/秒）
@@ -141,7 +147,7 @@ Web 界面通过 `//go:embed` 嵌入到二进制文件中，无需额外文件�
 | Pi Camera V2 | IMX219 | 3280×2464 | 固定焦 | `imx219` | 更好的低光性能 |
 | Pi Camera V3 | IMX708 | 4608×2592 | 自动对焦 | `imx708` | PDAF，HDR 支持 |
 | Pi HQ Camera | IMX477 | 4056×3040 | 手动镜头 | `imx477` | 可更换镜头 |
-| USB (UVC) | — | — | — | — | 不直接采集；若相机自身提供 RTSP，用 `camera.mode: rtsp` |
+| USB (UVC) | 各类 | 各类 | 固定焦 | `uvcvideo` | `camera.mode: v4l2` 直接采集（任意板）；软编兜底需设备装有 ffmpeg |
 
 ## 架构
 

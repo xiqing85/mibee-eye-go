@@ -12,7 +12,6 @@ import (
 	"io"
 )
 
-
 // maxFrameSize caps the payload size for a single pipe frame.
 // mtxrpicam video frames are typically < 1MB; 10MB is a generous ceiling
 // that rejects corrupted length prefixes before they cause OOM on the RPi.

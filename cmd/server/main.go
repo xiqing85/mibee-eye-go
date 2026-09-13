@@ -242,6 +242,18 @@ func main() {
 			camera.WithVidInfo(cameraInfo),
 			camera.WithVidFrameBufferSize(cfg.Camera.FrameBufferSize),
 		)
+	case "v4l2":
+		// Generic V4L2 backend (any board): pure-Go MMAP capture from
+		// /dev/videoN; M2M hardware encode when encoder_device probes
+		// capable, otherwise a resident ffmpeg subprocess.
+		slog.Info("camera: using generic v4l2 backend", "device", cfg.Camera.Device,
+			"encoder_device", cfg.Camera.EncoderDevice)
+		cam = camera.NewV4L2Source(
+			camera.WithV4L2Device(cfg.Camera.Device),
+			camera.WithV4L2EncoderDevice(cfg.Camera.EncoderDevice),
+			camera.WithV4L2Params(cameraParams),
+			camera.WithV4L2Info(cameraInfo),
+		)
 	default:
 		cam = camera.NewRPiCamera(
 			camera.WithBinPath(cfg.Camera.BinPath),

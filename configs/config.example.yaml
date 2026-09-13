@@ -6,8 +6,14 @@
 camera:
   # Camera device path (V4L2 or libcamera)
   device: /dev/video0
-  # Capture mode: "mtxrpicam" (default, uses subprocess), "rpicamvid" (system rpicam-vid), or "rtsp" (consumes external RTSP URL)
+  # Capture mode: "mtxrpicam" (default, Pi CSI subprocess pipe),
+  # "rpicamvid" (system rpicam-vid, Pi CSI), "rtsp" (external RTSP source),
+  # "v4l2" (generic V4L2 capture — any board, USB/UVC included)
   mode: mtxrpicam
+  # V4L2 M2M encoder node for mode=v4l2 (bcm2835-codec-encode on Pi;
+  # configure per SoC). Falls back to an ffmpeg subprocess when the node
+  # is absent or not M2M-capable.
+  encoder_device: /dev/video11
 
   # External RTSP URL when mode=rtsp (ignored when mode=mtxrpicam)
   rtsp_url: ""

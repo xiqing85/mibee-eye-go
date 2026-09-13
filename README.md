@@ -24,6 +24,12 @@ ONVIF/GB28181 device — see [Supported hardware](#supported-hardware). It provi
 
 This is the **Go implementation** of MiBee Eye. A sibling [Rust implementation](https://github.com/xiqing85/mibee-eye-raspi-rs) targets the most constrained boards — see [Which implementation should I use?](#which-implementation-should-i-use).
 
+**Runs on any Linux board** — three capture profiles: Pi CSI cameras via
+libcamera (`mtxrpicam`/`rpicamvid`), any V4L2/USB-UVC camera via the generic
+`v4l2` mode (hardware M2M encode when `camera.encoder_device` probes capable,
+otherwise a resident ffmpeg subprocess), and `rtsp` mode to re-publish an
+external RTSP stream as an ONVIF/GB28181 device from any box.
+
 ## Which implementation should I use?
 
 Both implementations speak the same protocols (ONVIF Profile S, GB28181,
@@ -82,7 +88,8 @@ sudo systemctl enable --now mibee-eye
 
 See `configs/config.example.yaml` for all configuration options. Key settings include:
 
-- `camera.mode` - Capture mode: `mtxrpicam` (subprocess pipe), `rpicamvid` (system rpicam-vid), or `rtsp` (pull from an RTSP source)
+- `camera.mode` - Capture mode: `mtxrpicam` (Pi CSI subprocess pipe), `rpicamvid` (system rpicam-vid), `rtsp` (pull from an RTSP source), or `v4l2` (generic V4L2 capture — any board, USB/UVC included)
+- `camera.encoder_device` - V4L2 M2M encoder node probed in `v4l2` mode (default `/dev/video11`, bcm2835-codec-encode; falls back to an ffmpeg subprocess when absent or not M2M-capable)
 - `camera.width/height` - Capture resolution (1280x720 default)
 - `camera.fps` - Frames per second (15 default for SBCs)
 - `camera.bitrate` - Video bitrate in bits per second
@@ -138,7 +145,7 @@ Access at `http://<device-ip>:8088/` with web UI credentials. Web UI defaults re
 | Pi Camera V2 | IMX219 | 3280×2464 | Fixed | `imx219` | Better low light |
 | Pi Camera V3 | IMX708 | 4608×2592 | Autofocus | `imx708` | PDAF, HDR support |
 | Pi HQ Camera | IMX477 | 4056×3040 | Manual lens | `imx477` | Interchangeable lens |
-| USB (UVC) | — | — | — | — | Not captured directly; if the camera exposes RTSP, use `camera.mode: rtsp` |
+| USB (UVC) | Various | Various | Fixed | `uvcvideo` | Direct capture in `camera.mode: v4l2` (any board); ffmpeg fallback encoder needs ffmpeg installed |
 
 ## Architecture
 
