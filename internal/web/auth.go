@@ -88,7 +88,7 @@ type sessionRecord struct {
 }
 
 type sessionsDoc struct {
-	Version  int                       `json:"version"`
+	Version  int                      `json:"version"`
 	Sessions map[string]sessionRecord `json:"sessions"`
 }
 

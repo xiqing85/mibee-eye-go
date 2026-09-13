@@ -146,12 +146,12 @@ func aiModelTestServer(t *testing.T) *Server {
 		t.Fatal("service must be active")
 	}
 	return New(Config{
-		Port:        8088,
-		Username:    "admin",
-		Password:    "spec-pass-1",
-		ConfigPath:  cfgFile,
-		Version:     "test",
-		AI:          svc,
+		Port:       8088,
+		Username:   "admin",
+		Password:   "spec-pass-1",
+		ConfigPath: cfgFile,
+		Version:    "test",
+		AI:         svc,
 	})
 }
 
@@ -438,7 +438,6 @@ func TestUploadDisabledAnswers501(t *testing.T) {
 		t.Fatalf("status = %d, want 501", rec.Code)
 	}
 }
-
 
 func TestUploadValidationFailureLeavesNoTrace(t *testing.T) {
 	dir := t.TempDir()

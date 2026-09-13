@@ -19,9 +19,9 @@ const (
 
 // Frame types (upper 4 bits of first byte in FLV video tag body).
 const (
-	frameTypeKeyFrame    = 1 << 4 // 0x10
-	frameTypeInterFrame  = 2 << 4 // 0x20
-	frameTypeDisposable  = 3 << 4 // 0x30
+	frameTypeKeyFrame   = 1 << 4 // 0x10
+	frameTypeInterFrame = 2 << 4 // 0x20
+	frameTypeDisposable = 3 << 4 // 0x30
 )
 
 // Codec IDs (lower 4 bits of first byte in FLV video tag body).
@@ -84,11 +84,11 @@ func makeAVCSequenceHeader(sps, pps []byte) ([]byte, error) {
 
 	// Header: 5 bytes
 	body := make([]byte, 0, 16+len(sps)+len(pps))
-	body = append(body, 0x01)                   // version
-	body = append(body, sps[1])                  // profile (AVCProfileIndication)
-	body = append(body, sps[2])                  // compatibility (profile_compatibility)
-	body = append(body, sps[3])                  // level (AVCLevelIndication)
-	body = append(body, 0xFF)                    // lengthSizeMinusOne (top 6 bits 1, bottom 2 = 0x11 for 4-byte)
+	body = append(body, 0x01)   // version
+	body = append(body, sps[1]) // profile (AVCProfileIndication)
+	body = append(body, sps[2]) // compatibility (profile_compatibility)
+	body = append(body, sps[3]) // level (AVCLevelIndication)
+	body = append(body, 0xFF)   // lengthSizeMinusOne (top 6 bits 1, bottom 2 = 0x11 for 4-byte)
 	// Actually: 0xFC | 0x03 = 0xFF for 4-byte NALU lengths
 	// NalUnitLengthSize = (reserved(1) << 6 | 0x3F) = 0xFF for 4 bytes
 

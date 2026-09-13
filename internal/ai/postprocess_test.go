@@ -101,9 +101,9 @@ func TestGridForInput416MatchesOnnxExport(t *testing.T) {
 		t.Fatalf("points = %d, want 3598", grid.points)
 	}
 	for _, c := range []struct {
-		idx                    int
-		level, gridX, gridY    int
-		stride                 uint32
+		idx                 int
+		level, gridX, gridY int
+		stride              uint32
 	}{
 		{0, 0, 0, 0, 8},
 		{52*52 - 1, 0, 51, 51, 8},
