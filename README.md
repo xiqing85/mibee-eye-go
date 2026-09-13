@@ -19,6 +19,24 @@
 
 MiBee Eye is a lightweight Go ONVIF camera service for single-board computers (Raspberry Pi, Banana Pi, Orange Pi) with support for all CSI/USB cameras. It provides ONVIF Device/Media/Imaging services, RTSP streaming, RTMP push, WS-Discovery, GB28181 device integration, and an embedded SPEC v1 web admin UI — for NVR/VMS integration.
 
+This is the **Go implementation** of MiBee Eye. A sibling [Rust implementation](https://github.com/xiqing85/mibee-eye-raspi-rs) targets the most constrained boards — see [Which implementation should I use?](#which-implementation-should-i-use).
+
+## Which implementation should I use?
+
+Both implementations speak the same protocols (ONVIF Profile S, GB28181,
+RTSP, RTMP), share the same SPEC v1 web UI/API, and interoperate with the same
+NVRs — pick by deployment profile:
+
+| Pick the **Go** implementation when… | Pick the **Rust** implementation when… |
+|---|---|
+| You want the quickest path: zero-CGO build, stock cross-compile | The board is memory/flash constrained (~2 MB binary, 6–12 MB RSS) |
+| You want HLS browser playback out of the box | You want the OSD watermark burned into every output |
+| You need the i18n UI or the runtime metrics API | You want capture + encode fully in-process (no capture subprocess) |
+| You prefer hacking on a Go codebase | You prefer hacking on a Rust codebase |
+
+Both: AI detection (NanoDet, opt-in) · GB 35114 A-level (opt-in) · continuous
+recording with GB28181 playback · imaging controls · snapshot.
+
 ## Features
 
 - **ONVIF Device/Media/Imaging Services** - Full ONVIF Profile S compliance for NVR integration, powered by [onvif-go/v2](https://github.com/mickeyzzc/onvif-go)
@@ -195,16 +213,23 @@ sequenceDiagram
     P->>C: SIP INFO (pause / resume / seek / speed)
 ```
 
-### Performance vs MediaMTX
+### vs running MediaMTX on the Pi as a camera source
 
-| Metric | MiBee Eye | MediaMTX | Improvement |
-|--------|---------|----------|-------------|
-| Memory Usage | **15–25 MB** | ~45 MB | 45–67% reduction |
-| ONVIF Server | ✅ **Profile S** (Device/Media/Imaging) | ❌ Not supported | — |
-| CGO Dependencies | **Zero** | CGO required | Painless cross-compile |
-| Camera Control | ✅ Brightness, Contrast, WB, etc. | ❌ None | — |
-| RTMP Push | ✅ Built-in | ❌ Extra config needed | — |
-| CPU Usage (720p@15fps) | ~15% | ~24% | 37% reduction |
+MediaMTX is an excellent media *server* (NVR/relay side) — and it is itself a
+pure-Go, zero-CGO project. The comparison below is only about the camera-side
+role: turning a Pi + CSI camera into an ONVIF/GB28181 device an NVR can
+discover and pull from.
+
+| Camera-side capability | MiBee Eye | MediaMTX |
+|------------------------|-----------|----------|
+| ONVIF device service (Profile S) | ✅ Device/Media/Imaging | ❌ (not its role) |
+| GB28181 device | ✅ | ❌ |
+| Camera imaging controls | ✅ Brightness/contrast/WB/… | ❌ |
+| RTMP push | ✅ built-in | ⚠️ possible, media-server style |
+| Memory (RPi 3B, 720p@15fps) | ~15–25 MB | ~45 MB (indicative) |
+
+Indicative numbers from our RPi 3B deployments — reproduce on your own board
+with [`bench/rpi-bench.sh`](bench/rpi-bench.sh).
 
 ### Technology Stack
 
@@ -217,7 +242,7 @@ sequenceDiagram
 | Camera Capture | `mtxrpicam` / `rpicam-vid` subprocess | Battle-tested libcamera, no CGO |
 | HLS Bridge | Pure Go MPEG-TS segmenter | No external dependencies, lightweight |
 | AI Detection | `onnxruntime_go` + ffmpeg keyframe decode | Dynamic ONNX runtime loading, keyframe-only cadence |
-| Web UI | [mibee-webui](https://github.com/Mi-Bee-Studio/mibee-webui) embedded + hls.js | Zero-build ES modules, capability-gated |
+| Web UI | Embedded zero-build ES modules UI + hls.js | Capability-gated rendering, no external deps |
 | Configuration | YAML | Human-readable, easy deployment |
 
 Built with pure Go — **zero CGO** in the default build. All protocols (ONVIF, GB28181, RTSP, RTMP, HLS, Snapshot) are implemented in pure Go; the only exception is the optional AI build tag, which links CGO against ONNX Runtime.
@@ -258,5 +283,9 @@ make deploy REMOTE_HOST=user@your-rpi-host
 
 ## License
 
-CC BY-NC 4.0 (non-commercial) — see [LICENSE](LICENSE). MediaMTX-derived
-portions (internal/camera) remain MIT; see [NOTICE](NOTICE).
+Source code is licensed **CC BY-NC 4.0 (non-commercial)** — see [LICENSE](LICENSE).
+MediaMTX-derived portions (internal/camera) remain MIT; see [NOTICE](NOTICE).
+
+**Commercial licensing** — use in commercial products or deployments requires
+a separate license from the author. Open an issue titled `[commercial-license]`
+to get in touch.
