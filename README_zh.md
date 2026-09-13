@@ -1,6 +1,6 @@
 # MiBee Eye（蜂眼）
 
-[![CI](https://github.com/xiqing85/mibee-eye-raspi-go/actions/workflows/ci.yml/badge.svg)](https://github.com/xiqing85/mibee-eye-raspi-go/actions/workflows/ci.yml)
+[![CI](https://github.com/xiqing85/mibee-eye-go/actions/workflows/ci.yml/badge.svg)](https://github.com/xiqing85/mibee-eye-go/actions/workflows/ci.yml)
 [![Go Version](https://img.shields.io/badge/go-1.26-blue.svg)](https://golang.org)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
@@ -17,11 +17,11 @@
 </div>
 
 
-MiBee Eye 是一个轻量级的 Go ONVIF 相机服务，面向树莓派（CSI 相机，经 libcamera）。
+MiBee Eye 是一个轻量级的 Go ONVIF 相机服务，跑在任意 Linux 板上（树莓派 CSI 经 libcamera，USB/UVC 走 v4l2 模式）。
 它也可以跑在任意 Linux 设备上做协议网关：`camera.mode: rtsp` 可把已有 RTSP 流
 变成 ONVIF/GB28181 设备 —— 见[支持的硬件](#支持的摄像头)。它提供 ONVIF 设备/媒体/成像服务、RTSP 流媒体、RTMP 推流、WS-Discovery、GB28181 国标接入与内嵌 SPEC v1 Web 管理界面，用于 NVR/VMS 集成。
 
-这是 MiBee Eye 的 **Go 实现**。另有一个面向极致受限板子的兄弟 [Rust 实现](https://github.com/xiqing85/mibee-eye-raspi-rs)，见[我该选哪个实现？](#我该选哪个实现)。
+这是 MiBee Eye 的 **Go 实现**。另有一个面向极致受限板子的兄弟 [Rust 实现](https://github.com/xiqing85/mibee-eye-rs)，见[我该选哪个实现？](#我该选哪个实现)。
 
 **任意 Linux 板可跑** —— 三种采集画像：树莓派 CSI 相机走 libcamera
 （`mtxrpicam`/`rpicamvid`）；任意 V4L2/USB-UVC 相机走通用 `v4l2` 模式
@@ -66,7 +66,7 @@ SPEC v1 Web UI/API、对接同样的 NVR —— 按部署画像选择：
 
 ```bash
 # 克隆并构建
-git clone https://github.com/xiqing85/mibee-eye-raspi-go
+git clone https://github.com/xiqing85/mibee-eye-go
 cd mibee-eye-raspi-go
 make build
 
