@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/xiqing85/mibee-eye-raspi-go/actions/workflows/ci.yml/badge.svg)](https://github.com/xiqing85/mibee-eye-raspi-go/actions/workflows/ci.yml)
 [![Go Version](https://img.shields.io/badge/go-1.26-blue.svg)](https://golang.org)
-[![License: CC BY-NC 4.0](https://img.shields.io/badge/License-CC_BY--NC--4.0-lightgrey.svg)](LICENSE)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
 [中文文档](README_zh.md)
 
@@ -17,7 +17,10 @@
 </div>
 
 
-MiBee Eye is a lightweight Go ONVIF camera service for single-board computers (Raspberry Pi, Banana Pi, Orange Pi) with support for all CSI/USB cameras. It provides ONVIF Device/Media/Imaging services, RTSP streaming, RTMP push, WS-Discovery, GB28181 device integration, and an embedded SPEC v1 web admin UI — for NVR/VMS integration.
+MiBee Eye is a lightweight Go ONVIF camera service for Raspberry Pi (CSI
+cameras via libcamera). It also runs on any Linux box as a protocol gateway:
+with `camera.mode: rtsp` it turns an existing RTSP stream into an
+ONVIF/GB28181 device — see [Supported hardware](#supported-hardware). It provides ONVIF Device/Media/Imaging services, RTSP streaming, RTMP push, WS-Discovery, GB28181 device integration, and an embedded SPEC v1 web admin UI — for NVR/VMS integration.
 
 This is the **Go implementation** of MiBee Eye. A sibling [Rust implementation](https://github.com/xiqing85/mibee-eye-raspi-rs) targets the most constrained boards — see [Which implementation should I use?](#which-implementation-should-i-use).
 
@@ -135,7 +138,7 @@ Access at `http://<device-ip>:8088/` with web UI credentials. Web UI defaults re
 | Pi Camera V2 | IMX219 | 3280×2464 | Fixed | `imx219` | Better low light |
 | Pi Camera V3 | IMX708 | 4608×2592 | Autofocus | `imx708` | PDAF, HDR support |
 | Pi HQ Camera | IMX477 | 4056×3040 | Manual lens | `imx477` | Interchangeable lens |
-| USB (UVC) | Various | Various | Various | Auto-detected | `/dev/video*` |
+| USB (UVC) | — | — | — | — | Not captured directly; if the camera exposes RTSP, use `camera.mode: rtsp` |
 
 ## Architecture
 
@@ -283,9 +286,8 @@ make deploy REMOTE_HOST=user@your-rpi-host
 
 ## License
 
-Source code is licensed **CC BY-NC 4.0 (non-commercial)** — see [LICENSE](LICENSE).
+Licensed under the **Apache License, Version 2.0** — see [LICENSE](LICENSE).
 MediaMTX-derived portions (internal/camera) remain MIT; see [NOTICE](NOTICE).
 
-**Commercial licensing** — use in commercial products or deployments requires
-a separate license from the author. Open an issue titled `[commercial-license]`
-to get in touch.
+> Licensing history: v0.1.0 shipped under CC BY-NC 4.0; the project
+> relicensed to Apache-2.0 on 2026-09-13 (sole copyright holder).
