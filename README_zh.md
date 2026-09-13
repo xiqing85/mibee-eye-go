@@ -19,7 +19,7 @@
 
 MiBee Eye 是一个轻量级的 Go ONVIF 相机服务，跑在任意 Linux 板上（树莓派 CSI 经 libcamera，USB/UVC 走 v4l2 模式）。
 它也可以跑在任意 Linux 设备上做协议网关：`camera.mode: rtsp` 可把已有 RTSP 流
-变成 ONVIF/GB28181 设备 —— 见[支持的硬件](#支持的摄像头)。它提供 ONVIF 设备/媒体/成像服务、RTSP 流媒体、RTMP 推流、WS-Discovery、GB28181 国标接入与内嵌 SPEC v1 Web 管理界面，用于 NVR/VMS 集成。
+变成 ONVIF/GB28181 设备 —— 见[支持的硬件](#支持的硬件)。它提供 ONVIF 设备/媒体/成像服务、RTSP 流媒体、RTMP 推流、WS-Discovery、GB28181 国标接入与内嵌 SPEC v1 Web 管理界面，用于 NVR/VMS 集成。
 
 这是 MiBee Eye 的 **Go 实现**。另有一个面向极致受限板子的兄弟 [Rust 实现](https://github.com/xiqing85/mibee-eye-rs)，见[我该选哪个实现？](#我该选哪个实现)。
 
@@ -59,7 +59,7 @@ SPEC v1 Web UI/API、对接同样的 NVR —— 按部署画像选择：
 - **国际化支持** - 中英文界面切换 (i18n)
 - **快照支持** - 通过 HTTP 端点获取 JPEG 快照
 - **运行指标** - 经 Web API 输出运行时指标摘要
-- **低内存占用** - 约 15-30MB RAM 使用量
+- **低内存占用** - 约 15–25 MB RAM（启用可选 AI 构建时另加 15 MB）
 - **跨平台构建** - 从 x86 工作站交叉编译到 aarch64 树莓派
 
 ## 快速开始
@@ -67,7 +67,7 @@ SPEC v1 Web UI/API、对接同样的 NVR —— 按部署画像选择：
 ```bash
 # 克隆并构建
 git clone https://github.com/xiqing85/mibee-eye-go
-cd mibee-eye-raspi-go
+cd mibee-eye-go
 make build
 
 # 复制并配置
@@ -82,6 +82,9 @@ sudo cp deploy/mibee-eye.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now mibee-eye
 ```
+
+Linux 预编译产物（amd64 / arm64 / armv7）见
+[Releases](https://github.com/xiqing85/mibee-eye-go/releases) 页面。
 
 ## 配置
 
@@ -139,7 +142,17 @@ sudo systemctl enable --now mibee-eye
 通过 `http://<设备IP>:8088/` 访问，Web 凭证缺省沿用 ONVIF 凭据。
 Web 界面通过 `//go:embed` 嵌入到二进制文件中，无需额外文件部署。
 
-## 支持的摄像头
+## 支持的硬件
+
+三种采集画像覆盖树莓派 CSI 模组、通用 V4L2 设备与既有 IP 相机：
+
+| 采集模式 | 适用平台 | 编码 |
+|---------|---------|------|
+| `mtxrpicam` / `rpicamvid` | 树莓派家族（CSI 模组） | libcamera 前端输出 H.264（子进程内） |
+| `v4l2` | 任意 Linux 板 —— 含 USB/UVC | 探测 `camera.encoder_device` 命中则进程内 V4L2 M2M 硬件编码，否则常驻 ffmpeg 子进程 |
+| `rtsp` | 任意主机（已有 IP 相机） | 转发源流（不转码） |
+
+### 树莓派 CSI 摄像头模组
 
 | 模组 | 传感器 | 分辨率 | 对焦 | DT Overlay | 说明 |
 |------|--------|--------|------|------------|------|
@@ -153,9 +166,9 @@ Web 界面通过 `//go:embed` 嵌入到二进制文件中，无需额外文件�
 
 ```mermaid
 flowchart LR
-    subgraph device["树莓派 — mibee-eye (Go)"]
-        CAM["CSI 摄像头<br/>(OV5647 / IMX219 / …)"]
-        CAP["相机采集<br/>mtxrpicam / rpicam-vid 子进程，<br/>或 RTSP 源"]
+    subgraph device["Linux 板 — mibee-eye (Go)"]
+        CAM["摄像头<br/>(CSI 模组或 USB/UVC)"]
+        CAP["相机采集<br/>mtxrpicam / rpicam-vid 子进程、<br/>进程内 V4L2（M2M 硬编或 ffmpeg 编码）、<br/>或 RTSP 源"]
         IMG["图像调节与翻转<br/>（统一重启烧录进流）"]
         HUB["AUHub<br/>编码帧扇出"]
         RTSP["RTSP 服务 :8554<br/>RTP over TCP / UDP"]
@@ -195,8 +208,10 @@ flowchart LR
     BROWSER <-- "REST + SSE + MSE/HLS" --> WEB
 ```
 
-相机采集使用久经考验的 libcamera 前端（`mtxrpicam` 子进程管道或系统
-`rpicam-vid`），服务本体保持纯 Go、零 CGO。所有订阅方共享同一编码帧枢纽
+树莓派上，采集使用久经考验的 libcamera 前端（`mtxrpicam` 子进程管道或系统
+`rpicam-vid`），服务本体保持纯 Go、零 CGO。通用 `v4l2` 模式进程内采集
+（纯 Go V4L2：探测到 M2M 节点走硬编，否则常驻 ffmpeg 子进程软编）；
+`rtsp` 模式转发外部流、不转码。所有订阅方共享同一编码帧枢纽
 （AUHub）—— 包括 AI 检测器：它被动订阅，绝不干扰采集与推流路径。
 ONVIF/GB28181 协议逻辑位于独立协议库
 [onvif-go/v2](https://github.com/mickeyzzc/onvif-go) 与
@@ -255,7 +270,7 @@ ONVIF/GB28181 设备。
 | GB28181 设备端 | [gb28181-go/device](https://github.com/mickeyzzc/gb28181-go) | 独立协议库，纯 Go |
 | RTSP 服务 | `bluenviron/gortsplib/v5` | 与 MediaMTX 同源，兼容性久经考验 |
 | RTMP 推流 | 纯 Go 实现 | 维护活跃，占用低 |
-| 相机采集 | `mtxrpicam` / `rpicam-vid` 子进程 | 久经考验的 libcamera，零 CGO |
+| 相机采集 | `mtxrpicam` / `rpicam-vid` 子进程，或进程内 V4L2 | Pi 上久经考验的 libcamera；其余平台纯 Go V4L2（M2M 硬编 + ffmpeg 兜底） |
 | HLS 桥接 | 纯 Go MPEG-TS 分段器 | 无外部依赖，轻量 |
 | AI 检测 | `onnxruntime_go` + ffmpeg 关键帧解码 | ONNX 运行库动态加载，按关键帧节奏检测 |
 | Web 界面 | 内嵌零构建 ES Modules UI + hls.js | 能力门控渲染，无外部依赖 |

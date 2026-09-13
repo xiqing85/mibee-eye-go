@@ -6,9 +6,9 @@ import (
 
 func TestParseRTMPURL(t *testing.T) {
 	tests := []struct {
-		raw          string
-		wantAddr     string
-		wantApp      string
+		raw           string
+		wantAddr      string
+		wantApp       string
 		wantStreamKey string
 	}{
 		{"rtmp://example.com/live/stream", "example.com:1935", "live", "stream"},

@@ -246,7 +246,7 @@ func buildPESHeader(pts int64, _ int) []byte {
 	// byte 2: PTS[21:15](7) | marker=1(1)
 	// byte 3: PTS[14:7](8)
 	// byte 4: PTS[6:0](7) | marker=1(1)
-	hdr[9] = 0x21 | byte((pts>>30)&0x0E) // 0010 P[32:30] 1
+	hdr[9] = 0x21 | byte((pts>>30)&0x0E)  // 0010 P[32:30] 1
 	hdr[10] = byte(pts >> 22)             // P[29:22]
 	hdr[11] = byte((pts>>15)&0xFE) | 0x01 // P[21:15] 1
 	hdr[12] = byte(pts >> 7)              // P[14:7]
