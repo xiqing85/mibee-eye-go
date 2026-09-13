@@ -12,9 +12,9 @@ import (
 )
 
 type fakeDetector struct {
-	model  string
-	calls  int
-	fail   bool
+	model string
+	calls int
+	fail  bool
 }
 
 func (f *fakeDetector) Detect(frame *Frame, videoW, videoH uint32) ([]Detection, error) {

@@ -95,8 +95,8 @@ func TestParseMultipleNALUs(t *testing.T) {
 		isIDR bool
 	}
 	want := []wantNALU{
-		{7, true, false, false}, // SPS
-		{8, false, true, false}, // PPS
+		{7, true, false, false},  // SPS
+		{8, false, true, false},  // PPS
 		{5, false, false, true},  // IDR
 		{1, false, false, false}, // non-IDR
 	}

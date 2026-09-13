@@ -62,13 +62,13 @@ recording with GB28181 playback · imaging controls · snapshot.
 - **i18n Support** - English/Chinese web UI
 - **Snapshot Support** - JPEG snapshots via HTTP endpoint
 - **Metrics** - Runtime metrics summary over the web API
-- **Low Memory Footprint** - ~15-30MB RAM usage
+- **Low Memory Footprint** - ~15–25 MB RAM usage (+15 MB when the optional AI build is used)
 - **Cross-Platform Build** - Compile from x86 workstation to aarch64 RPi
 
 ```bash
 # Clone and build
 git clone https://github.com/xiqing85/mibee-eye-go
-cd mibee-eye-raspi-go
+cd mibee-eye-go
 make build
 
 # Copy and configure
@@ -83,6 +83,9 @@ sudo cp deploy/mibee-eye.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now mibee-eye
 ```
+
+Prebuilt binaries for Linux (amd64 / arm64 / armv7) are available on the
+[Releases](https://github.com/xiqing85/mibee-eye-go/releases) page.
 
 ## Configuration
 
@@ -137,7 +140,18 @@ The built-in web admin panel follows the SPEC v1 API shared across the MiBee cam
 
 Access at `http://<device-ip>:8088/` with web UI credentials. Web UI defaults reuse ONVIF credentials. The Web UI is embedded in the binary via `//go:embed` — no additional files to deploy.
 
-## Supported Cameras
+## Supported Hardware
+
+Three capture profiles cover Pi CSI modules, generic V4L2 devices and
+existing IP cameras:
+
+| Capture mode | Works on | Encoding |
+|--------------|----------|----------|
+| `mtxrpicam` / `rpicamvid` | Raspberry Pi family (CSI module) | H.264 from the libcamera front end (subprocess) |
+| `v4l2` | any Linux board — USB/UVC included | in-process V4L2 M2M hardware when `camera.encoder_device` probes capable, otherwise a resident ffmpeg subprocess |
+| `rtsp` | any host with an existing IP camera | re-publishes the source stream (no re-encode) |
+
+### Camera Modules (Pi CSI)
 
 | Module | Sensor | Resolution | Focus | DT Overlay | Notes |
 |--------|--------|------------|-------|------------|-------|
@@ -151,9 +165,9 @@ Access at `http://<device-ip>:8088/` with web UI credentials. Web UI defaults re
 
 ```mermaid
 flowchart LR
-    subgraph device["Raspberry Pi — mibee-eye (Go)"]
-        CAM["CSI camera<br/>(OV5647 / IMX219 / …)"]
-        CAP["Camera capture<br/>mtxrpicam / rpicam-vid subprocess,<br/>or RTSP source"]
+    subgraph device["Linux board — mibee-eye (Go)"]
+        CAM["Camera<br/>(CSI module or USB/UVC)"]
+        CAP["Camera capture<br/>mtxrpicam / rpicam-vid subprocess,<br/>in-process V4L2 (M2M hw or ffmpeg encode),<br/>or RTSP source"]
         IMG["Imaging adjustments & flips<br/>(baked in via unified restart)"]
         HUB["AUHub<br/>encoded frame fan-out"]
         RTSP["RTSP server :8554<br/>RTP over TCP / UDP"]
@@ -193,7 +207,17 @@ flowchart LR
     BROWSER <-- "REST + SSE + MSE/HLS" --> WEB
 ```
 
-Camera capture uses a battle-tested libcamera front end (`mtxrpicam` subprocess pipe, or the system `rpicam-vid`), so the service itself stays pure Go with zero CGO. Every subscriber taps the same encoded frame hub (AUHub) — including the AI detector, which subscribes passively and never interferes with capture or streaming. ONVIF/GB28181 protocol logic lives in the extracted libraries [onvif-go/v2](https://github.com/mickeyzzc/onvif-go) and [gb28181-go](https://github.com/mickeyzzc/gb28181-go).
+On a Raspberry Pi, capture uses a battle-tested libcamera front end
+(`mtxrpicam` subprocess pipe, or the system `rpicam-vid`), so the service
+itself stays pure Go with zero CGO. The generic `v4l2` mode captures
+in-process (pure-Go V4L2: M2M hardware encode when the probed node is
+capable, otherwise a resident ffmpeg subprocess), and `rtsp` mode re-publishes
+an external stream without re-encoding. Every subscriber taps the same
+encoded frame hub (AUHub) — including the AI detector, which subscribes
+passively and never interferes with capture or streaming. ONVIF/GB28181
+protocol logic lives in the extracted libraries
+[onvif-go/v2](https://github.com/mickeyzzc/onvif-go) and
+[gb28181-go](https://github.com/mickeyzzc/gb28181-go).
 
 ### GB28181 interaction overview
 
@@ -249,7 +273,7 @@ with [`bench/rpi-bench.sh`](bench/rpi-bench.sh).
 | GB28181 Device | [gb28181-go/device](https://github.com/mickeyzzc/gb28181-go) | Extracted protocol library, pure Go |
 | RTSP Server | `bluenviron/gortsplib/v5` | Same as MediaMTX, proven compatibility |
 | RTMP Push | Pure Go implementation | Active maintenance, low footprint |
-| Camera Capture | `mtxrpicam` / `rpicam-vid` subprocess | Battle-tested libcamera, no CGO |
+| Camera Capture | `mtxrpicam` / `rpicam-vid` subprocess, or in-process V4L2 | Battle-tested libcamera on Pi; pure-Go V4L2 (M2M hw + ffmpeg fallback) elsewhere |
 | HLS Bridge | Pure Go MPEG-TS segmenter | No external dependencies, lightweight |
 | AI Detection | `onnxruntime_go` + ffmpeg keyframe decode | Dynamic ONNX runtime loading, keyframe-only cadence |
 | Web UI | Embedded zero-build ES modules UI + hls.js | Capability-gated rendering, no external deps |

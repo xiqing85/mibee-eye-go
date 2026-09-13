@@ -38,6 +38,7 @@ type Config struct {
 	// UDPRTCPPort is the UDP port for RTCP packets (default: 8001).
 	UDPRTCPPort int
 }
+
 // Server wraps gortsplib for H.264 streaming.
 // It reads H.264 access units from a frame source channel and
 // distributes them as RTP packets to connected RTSP clients.
@@ -136,6 +137,7 @@ func (s *Server) Start(ctx context.Context) error {
 		}
 	}
 }
+
 // Stop gracefully stops the RTSP server and closes all client connections.
 func (s *Server) Stop() error {
 	s.mu.Lock()

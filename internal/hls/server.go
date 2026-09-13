@@ -31,16 +31,16 @@ type Server struct {
 
 	hub             *h264.AUHub
 	segmentDuration time.Duration
-	fps             int        // frames per second for PTS calculation
-	windowSize      int        // number of segments to keep (default 5)
+	fps             int // frames per second for PTS calculation
+	windowSize      int // number of segments to keep (default 5)
 
-	segments []*Segment    // sliding window (oldest at index 0)
-	sequence uint64        // next segment sequence number
+	segments []*Segment // sliding window (oldest at index 0)
+	sequence uint64     // next segment sequence number
 
 	// Current segment being built.
 	currentSeg *segmentBuilder
-	currentPTS int64  // PTS for the next AU (running clock, never resets)
-	frameCount int64  // total frames processed (for PTS tracking)
+	currentPTS int64 // PTS for the next AU (running clock, never resets)
+	frameCount int64 // total frames processed (for PTS tracking)
 
 	// Cached SPS/PPS from the latest keyframe (raw NALU data, no start codes).
 	latestSPS []byte
@@ -71,10 +71,10 @@ func New(cfg Config) *Server {
 		fps = 15
 	}
 	return &Server{
-		hub:               cfg.Hub,
-		segmentDuration:   dur,
-		fps:               fps,
-		windowSize:        5,
+		hub:                cfg.Hub,
+		segmentDuration:    dur,
+		fps:                fps,
+		windowSize:         5,
 		waitingForKeyframe: true,
 	}
 }
@@ -102,6 +102,7 @@ func (s *Server) Start(ctx context.Context) {
 		}
 	}
 }
+
 // processAU handles one access unit.
 func (s *Server) processAU(au h264.AccessUnit, ptsIncrement int64) {
 	s.mu.Lock()

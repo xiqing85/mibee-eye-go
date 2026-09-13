@@ -39,15 +39,15 @@ func initOnnxRuntime(libPath string) error {
 
 // OrtDetector runs family-dispatched inference through ONNX Runtime.
 type OrtDetector struct {
-	modelPath   string
-	family      family
-	session     *ort.DynamicAdvancedSession
-	inputName   string
-	outputName  string
+	modelPath      string
+	family         family
+	session        *ort.DynamicAdvancedSession
+	inputName      string
+	outputName     string
 	inputW, inputH uint32
-	outputShape ort.Shape
-	mu          sync.Mutex // session.Run is not safe for concurrent use
-	closed      bool
+	outputShape    ort.Shape
+	mu             sync.Mutex // session.Run is not safe for concurrent use
+	closed         bool
 }
 
 // newOrtDetector loads the model and prepares the session. The shared

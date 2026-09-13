@@ -53,4 +53,4 @@ checksum:
 release:
   github:
     owner: xiqing85
-    name: mibee-eye-raspi-go
+    name: mibee-eye-go

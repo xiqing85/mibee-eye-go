@@ -41,7 +41,8 @@ Use conventional commits:
 ```
 cmd/server/          # Main application binary
 internal/
-  camera/            # Camera capture (mtxrpicam pipe / rpicam-vid / RTSP source)
+  camera/            # Camera capture (mtxrpicam pipe / rpicam-vid / in-process V4L2 / RTSP source)
+  v4l2/              # Pure-Go V4L2 layer (capture, M2M encode, probe; 64-bit UABI size-pinned)
   onvif/             # ONVIF glue over onvif-go/v2
   gb35114auth/       # GB 35114 A-level auth (build tag gb35114)
   rtsp/              # RTSP server utilities
@@ -61,6 +62,8 @@ deploy/              # systemd units
 ## Adding Camera Support
 
 Capture modes live in `internal/camera/`: `camera.go` (mtxrpicam subprocess
-pipe), `rpicamvid.go` (system rpicam-vid), and `rtsp_source.go` (pull from an
-RTSP source). A new mode implements the internal `Camera` interface and is
-selected via `camera.mode` in the YAML config.
+pipe), `rpicamvid.go` (system rpicam-vid), `v4l2_source.go` (in-process
+generic V4L2 capture — any board, USB/UVC included, M2M hardware encode with
+an ffmpeg fallback), and `rtsp_source.go` (pull from an RTSP source). A new
+mode implements the internal `Camera` interface and is selected via
+`camera.mode` in the YAML config.

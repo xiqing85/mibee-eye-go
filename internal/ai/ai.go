@@ -18,8 +18,8 @@ package ai
 // (SPEC v1 §4.6): bbox is [x, y, w, h], origin top-left, in the camera's
 // native stream resolution.
 type Detection struct {
-	Label      string   `json:"label"`
-	Confidence float32  `json:"confidence"`
+	Label      string    `json:"label"`
+	Confidence float32   `json:"confidence"`
 	BBox       [4]uint32 `json:"bbox"`
 }
 

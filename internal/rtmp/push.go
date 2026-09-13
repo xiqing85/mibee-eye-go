@@ -34,9 +34,9 @@ const (
 	rtmpHandshakeSize = 1536
 
 	// Chunk stream IDs
-	csIDProtocol   = 2 // protocol control messages (SetChunkSize, etc.)
-	csIDCommand    = 3 // command messages (connect, createStream, publish)
-	csIDVideo      = 6 // video data stream
+	csIDProtocol = 2 // protocol control messages (SetChunkSize, etc.)
+	csIDCommand  = 3 // command messages (connect, createStream, publish)
+	csIDVideo    = 6 // video data stream
 
 	// Message type IDs
 	msgTypeSetChunkSize          = 0x01
@@ -52,16 +52,16 @@ const (
 	// User control message types
 	userCtrlStreamBegin = 0x00
 
-	defaultChunkSize    = 128
-	preferredChunkSize  = 4096
+	defaultChunkSize   = 128
+	preferredChunkSize = 4096
 
 	defaultPort = 1935
 )
 
 // Push sends an H.264 stream to an RTMP server.
 type Push struct {
-	cfg    Config
-	hub    *h264.AUHub
+	cfg Config
+	hub *h264.AUHub
 
 	mu       sync.Mutex
 	conn     net.Conn
@@ -96,9 +96,9 @@ type Config struct {
 
 // Errors.
 var (
-	errUnexpectedEOF  = errors.New("rtmp: unexpected EOF")
-	errAMFType        = errors.New("rtmp: unexpected AMF type")
-	errHandshake      = errors.New("rtmp: handshake failed")
+	errUnexpectedEOF   = errors.New("rtmp: unexpected EOF")
+	errAMFType         = errors.New("rtmp: unexpected AMF type")
+	errHandshake       = errors.New("rtmp: handshake failed")
 	errConnectRejected = errors.New("rtmp: connect rejected")
 	errStreamRejected  = errors.New("rtmp: createStream rejected")
 	errPublishRejected = errors.New("rtmp: publish rejected")
@@ -315,7 +315,6 @@ func (p *Push) pushLoop(ctx context.Context, br *bufio.Reader, bw *bufio.Writer,
 		_ = bw.Flush()
 	}()
 
-	
 	seqHeaderSent := false
 
 	slog.Info("rtmp: push loop started")
@@ -546,9 +545,9 @@ func (p *Push) doHandshake(br *bufio.Reader, bw *bufio.Writer) error {
 	// Next 4 bytes: client timestamp (from C1[0:4])
 	// Remaining 1528 bytes: S1 random data (S1[8:])
 	c2 := make([]byte, rtmpHandshakeSize)
-	copy(c2[0:4], s1[0:4])    // echo server timestamp
-	copy(c2[4:8], c1[0:4])    // echo client timestamp
-	copy(c2[8:], s1[8:])      // echo server random data
+	copy(c2[0:4], s1[0:4]) // echo server timestamp
+	copy(c2[4:8], c1[0:4]) // echo client timestamp
+	copy(c2[8:], s1[8:])   // echo server random data
 	if _, err := bw.Write(c2); err != nil {
 		return err
 	}
@@ -985,4 +984,3 @@ func parseRTMPURL(rawURL string) (addr, app, streamKey string, err error) {
 
 	return addr, app, streamKey, nil
 }
-
