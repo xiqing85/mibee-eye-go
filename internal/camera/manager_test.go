@@ -19,8 +19,8 @@ func newMockCamera() *mockCamera {
 }
 
 func (m *mockCamera) Start(_ context.Context) error { return nil }
-func (m *mockCamera) Stop() error               { return nil }
-func (m *mockCamera) Frames() <-chan Frame       { return nil }
+func (m *mockCamera) Stop() error                   { return nil }
+func (m *mockCamera) Frames() <-chan Frame          { return nil }
 
 func (m *mockCamera) SetParam(name string, value interface{}) error {
 	m.mu.Lock()

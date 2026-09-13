@@ -67,6 +67,7 @@ type ParamManager struct {
 func NewParamManager(cam Camera) *ParamManager {
 	return &ParamManager{cam: cam}
 }
+
 // SetOnChange registers a callback invoked after a successful Set.
 // The callback is called outside the mutex lock to avoid deadlock if the
 // callback re-enters ParamManager. Pass nil to clear.
@@ -149,6 +150,7 @@ func (pm *ParamManager) Validate(name string, value interface{}) error {
 
 	return nil
 }
+
 // toFloat64 converts interface{} values to float64 for range comparison.
 func toFloat64(value interface{}) (float64, error) {
 	switch v := value.(type) {
