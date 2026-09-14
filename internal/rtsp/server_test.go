@@ -15,7 +15,7 @@ import (
 	"github.com/bluenviron/gortsplib/v5/pkg/format"
 	"github.com/pion/rtp"
 
-	"github.com/Mi-Bee-Studio/mibee-eye-raspi/internal/h264"
+	"github.com/xiqing85/mibee-eye-go/internal/h264"
 )
 
 // findFreePort returns a free TCP port for testing.

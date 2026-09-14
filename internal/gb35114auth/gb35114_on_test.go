@@ -8,7 +8,7 @@ import (
 
 	sec "github.com/mickeyzzc/gb28181-go/security35114"
 
-	"github.com/Mi-Bee-Studio/mibee-eye-raspi/internal/config"
+	"github.com/xiqing85/mibee-eye-go/internal/config"
 )
 
 const (

@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/Mi-Bee-Studio/mibee-eye-raspi/internal/h264"
+	"github.com/xiqing85/mibee-eye-go/internal/h264"
 )
 
 // buildAnnexB joins NALUs into an Annex-B bytestream with 4-byte start codes.

@@ -14,9 +14,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/Mi-Bee-Studio/mibee-eye-raspi/internal/camera"
-	"github.com/Mi-Bee-Studio/mibee-eye-raspi/internal/config"
-	"github.com/Mi-Bee-Studio/mibee-eye-raspi/internal/onvif"
+	"github.com/xiqing85/mibee-eye-go/internal/camera"
+	"github.com/xiqing85/mibee-eye-go/internal/config"
+	"github.com/xiqing85/mibee-eye-go/internal/onvif"
 )
 
 // The tests in this file lock the wire-level contract the MiBee NVR depends

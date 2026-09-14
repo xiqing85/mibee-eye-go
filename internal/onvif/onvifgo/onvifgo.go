@@ -26,9 +26,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/Mi-Bee-Studio/mibee-eye-raspi/internal/camera"
-	"github.com/Mi-Bee-Studio/mibee-eye-raspi/internal/config"
-	"github.com/Mi-Bee-Studio/mibee-eye-raspi/internal/onvif"
+	"github.com/xiqing85/mibee-eye-go/internal/camera"
+	"github.com/xiqing85/mibee-eye-go/internal/config"
+	"github.com/xiqing85/mibee-eye-go/internal/onvif"
 
 	onvifserver "github.com/mickeyzzc/onvif-go/v2/server"
 	onvifdiscovery "github.com/mickeyzzc/onvif-go/v2/server/discovery"

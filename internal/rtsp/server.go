@@ -16,7 +16,7 @@ import (
 	"github.com/bluenviron/gortsplib/v5/pkg/format/rtph264"
 	"github.com/bluenviron/gortsplib/v5/pkg/liberrors"
 
-	"github.com/Mi-Bee-Studio/mibee-eye-raspi/internal/h264"
+	"github.com/xiqing85/mibee-eye-go/internal/h264"
 )
 
 // Config holds RTSP server configuration.

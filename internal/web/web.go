@@ -15,10 +15,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Mi-Bee-Studio/mibee-eye-raspi/internal/ai"
-	"github.com/Mi-Bee-Studio/mibee-eye-raspi/internal/camera"
-	"github.com/Mi-Bee-Studio/mibee-eye-raspi/internal/config"
-	"github.com/Mi-Bee-Studio/mibee-eye-raspi/internal/h264"
+	"github.com/xiqing85/mibee-eye-go/internal/ai"
+	"github.com/xiqing85/mibee-eye-go/internal/camera"
+	"github.com/xiqing85/mibee-eye-go/internal/config"
+	"github.com/xiqing85/mibee-eye-go/internal/h264"
 
 	"gopkg.in/yaml.v3"
 )

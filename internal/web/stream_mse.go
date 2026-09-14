@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Mi-Bee-Studio/mibee-eye-raspi/internal/h264"
+	"github.com/xiqing85/mibee-eye-go/internal/h264"
 )
 
 // realignTracker gates serialization after stream loss. A unit lost to a

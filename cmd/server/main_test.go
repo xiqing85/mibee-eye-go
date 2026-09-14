@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 
-	"github.com/Mi-Bee-Studio/mibee-eye-raspi/internal/camera"
+	"github.com/xiqing85/mibee-eye-go/internal/camera"
 )
 
 // noOpCamera is a stub camera.Camera used in tests.

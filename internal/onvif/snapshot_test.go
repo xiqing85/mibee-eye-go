@@ -6,7 +6,7 @@ import (
 	"os/exec"
 	"testing"
 
-	"github.com/Mi-Bee-Studio/mibee-eye-raspi/internal/h264"
+	"github.com/xiqing85/mibee-eye-go/internal/h264"
 )
 
 // loadSnapshotFixture parses testdata/snapshot_idr.h264 — a real, decodable

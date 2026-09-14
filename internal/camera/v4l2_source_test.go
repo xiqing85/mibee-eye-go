@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Mi-Bee-Studio/mibee-eye-raspi/internal/h264"
-	"github.com/Mi-Bee-Studio/mibee-eye-raspi/internal/v4l2"
+	"github.com/xiqing85/mibee-eye-go/internal/h264"
+	"github.com/xiqing85/mibee-eye-go/internal/v4l2"
 )
 
 // ── encoder selection ────────────────────────────────────────────────────
