@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/Mi-Bee-Studio/mibee-eye-raspi/internal/ai"
+	"github.com/xiqing85/mibee-eye-go/internal/ai"
 	"gopkg.in/yaml.v3"
 )
 

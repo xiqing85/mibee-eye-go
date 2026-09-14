@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Mi-Bee-Studio/mibee-eye-raspi/internal/camera"
+	"github.com/xiqing85/mibee-eye-go/internal/camera"
 
 	"gopkg.in/yaml.v3"
 )
