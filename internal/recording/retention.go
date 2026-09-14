@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/Mi-Bee-Studio/mibee-eye-raspi/internal/config"
+	"github.com/xiqing85/mibee-eye-go/internal/config"
 )
 
 // Retention enforces the recording retention policy: it periodically

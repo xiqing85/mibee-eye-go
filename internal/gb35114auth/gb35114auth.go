@@ -8,8 +8,8 @@ package gb35114auth
 import (
 	"fmt"
 
-	"github.com/Mi-Bee-Studio/mibee-eye-raspi/internal/config"
 	gbdev "github.com/mickeyzzc/gb28181-go/device"
+	"github.com/xiqing85/mibee-eye-go/internal/config"
 )
 
 // Build constructs the REGISTER authenticator from the product config.

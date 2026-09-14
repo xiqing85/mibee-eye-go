@@ -3,7 +3,7 @@ package gb35114auth
 import (
 	"testing"
 
-	"github.com/Mi-Bee-Studio/mibee-eye-raspi/internal/config"
+	"github.com/xiqing85/mibee-eye-go/internal/config"
 )
 
 func TestBuildDisabledReturnsNil(t *testing.T) {

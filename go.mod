@@ -1,4 +1,4 @@
-module github.com/Mi-Bee-Studio/mibee-eye-raspi
+module github.com/xiqing85/mibee-eye-go
 
 go 1.26.0
 
