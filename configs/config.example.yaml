@@ -221,6 +221,12 @@ gb28181:
   # Minimum seconds between AI alarm NOTIFYs (anti-storm)
   alarm_cooldown_secs: 30
 
+  # Surveyed coordinates reported as MobilePosition NOTIFYs while a
+  # platform holds a position subscription (GB 度分秒 string form,
+  # carried verbatim; both keys must be set to enable).
+  #longitude: "1163942.55E"
+  #latitude: "395436.30N"
+
 # Local continuous recording settings (disabled by default)
 # Segments are bare H.264 files at recordings/YYYY-MM-DD/HH/MMSS.h264
 # plus an append-only recordings/index.jsonl consumed by GB28181 RecordInfo

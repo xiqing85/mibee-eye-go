@@ -132,3 +132,22 @@ func (r *recordingSender) SendAlarm(priority, method, alarmTime, alarmType, desc
 	r.calls = append(r.calls, alarmFields{priority, method, alarmType, alarmTime, description})
 	return true
 }
+
+func TestMirrorModeToFlips(t *testing.T) {
+	cases := []struct {
+		mode uint32
+		h, v bool
+	}{
+		{0, false, false},
+		{1, true, false},
+		{2, false, true},
+		{3, true, true},
+		{9, false, false},
+	}
+	for _, c := range cases {
+		h, v := MirrorModeToFlips(c.mode)
+		if h != c.h || v != c.v {
+			t.Fatalf("mode %d = (%v,%v), want (%v,%v)", c.mode, h, v, c.h, c.v)
+		}
+	}
+}
