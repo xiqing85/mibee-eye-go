@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/xiqing85/mibee-eye-go/internal/gbalarm"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -132,6 +134,16 @@ type GB28181Config struct {
 	// lifecycle. Requires a binary built with `-tags gb35114` and
 	// pre-provisioned SM2 certificates (GM/T 0015-2012). Default off.
 	GB35114 GB35114Config `yaml:"gb35114"`
+
+	// AlarmNotifyEnabled is the boot default of the AI→alarm gate:
+	// forward AI moving-target detections as alarm NOTIFYs (method 5
+	// 视频报警, type 2 运动目标检测) while a platform holds an Alarm
+	// subscription. The platform's DeviceConfig(AlarmReport) switch
+	// gates it at runtime.
+	AlarmNotifyEnabled bool `yaml:"alarm_notify_enabled"`
+	// AlarmCooldownSecs is the minimum spacing between AI alarm NOTIFYs
+	// (rising-edge anti-storm).
+	AlarmCooldownSecs int `yaml:"alarm_cooldown_secs"`
 }
 
 // GB35114Config holds GB 35114 A-level security settings. When enabled,
@@ -278,6 +290,8 @@ func DefaultConfig() *Config {
 			HeartbeatTimeoutCount: 3,
 			Transport:             "udp",
 			GB35114:               GB35114Config{},
+			AlarmNotifyEnabled:    true,
+			AlarmCooldownSecs:     int(gbalarm.DefaultCooldown / time.Second),
 		},
 		Recording: RecordingConfig{
 			Enabled:       false,
