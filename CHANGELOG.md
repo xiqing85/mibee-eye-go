@@ -2,6 +2,13 @@
 
 Notable changes to MiBee Eye (Go implementation) are documented here.
 
+> **Releases are synchronized** with the Rust implementation
+> ([mibee-eye-rs](https://github.com/xiqing85/mibee-eye-rs)): same version
+> number, same day, cross-linked release notes — never one repo alone.
+> The next synchronized release is v0.3.0 (headline scope: complete
+> GB/T 28181-2022 device-role coverage — see
+> [docs/roadmap-v0.3.0.md](docs/roadmap-v0.3.0.md)).
+
 ## [0.2.0] — 2026-09-13
 
 ### Added
