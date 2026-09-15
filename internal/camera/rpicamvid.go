@@ -107,8 +107,8 @@ func WithVidInfo(info CameraInfo) RPiCamVidOption {
 // NewRPiCamVidCamera creates a new RPiCamVidCamera with the given options.
 func NewRPiCamVidCamera(opts ...RPiCamVidOption) *RPiCamVidCamera {
 	c := &RPiCamVidCamera{
-		params:          DefaultParams(),
-		binPath:         "rpicam-vid",
+		params: DefaultParams(),
+		// No invented bin default: main wires camera.vid_bin from config.
 		frameBufferSize: 30,
 		maxBackoff:      30 * time.Second,
 		info: CameraInfo{
