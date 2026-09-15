@@ -27,11 +27,14 @@ type SnapshotBuffer struct {
 	latestPPS []byte // PPS NALU with start code
 	hasFrame  bool
 	enabled   bool
+	stillBin  string // still-capture binary (camera.still_bin)
+	ffmpegBin string // transcode binary (camera.ffmpeg_bin)
 }
 
-// NewSnapshotBuffer creates a new SnapshotBuffer.
-func NewSnapshotBuffer(enabled bool) *SnapshotBuffer {
-	return &SnapshotBuffer{enabled: enabled}
+// NewSnapshotBuffer creates a new SnapshotBuffer. The binaries come from
+// camera config (still_bin / ffmpeg_bin) — no defaults are invented here.
+func NewSnapshotBuffer(enabled bool, stillBin, ffmpegBin string) *SnapshotBuffer {
+	return &SnapshotBuffer{enabled: enabled, stillBin: stillBin, ffmpegBin: ffmpegBin}
 }
 
 // Update stores the latest IDR frame data from an AUHub access unit.
@@ -83,9 +86,9 @@ func (sb *SnapshotBuffer) Update(au h264.AccessUnit) {
 //
 // Returns: image bytes, MIME content type, error.
 func (sb *SnapshotBuffer) Snapshot() ([]byte, string, error) {
-	// Tier 1: rpicam-still JPEG capture
-	if data, err := captureRPiCamStill(); err == nil {
-		slog.Debug("snapshot: captured via rpicam-still")
+	// Tier 1: still-capture JPEG (camera.still_bin)
+	if data, err := sb.captureStill(); err == nil {
+		slog.Debug("snapshot: captured via still bin", "bin", sb.stillBin)
 		return data, "image/jpeg", nil
 	}
 
@@ -106,8 +109,9 @@ func (sb *SnapshotBuffer) Snapshot() ([]byte, string, error) {
 	}
 	buf.Write(sb.latestIDR)
 
-	// Tier 2: single-frame transcode of the cached access unit.
-	if data, err := h264ToJPEG(buf.Bytes()); err == nil {
+	// Tier 2: single-frame transcode of the cached access unit
+	// (camera.ffmpeg_bin).
+	if data, err := sb.h264ToJPEG(buf.Bytes()); err == nil {
 		slog.Debug("snapshot: cached IDR transcoded to JPEG via ffmpeg")
 		return data, "image/jpeg", nil
 	}
@@ -149,13 +153,17 @@ func (sb *SnapshotBuffer) SubscribeToHub(ctx context.Context, hub *h264.AUHub) {
 	}
 }
 
-// captureRPiCamStill attempts to capture a JPEG frame using rpicam-still.
+// captureStill attempts to capture a JPEG frame via the configured
+// still-capture binary (camera.still_bin, e.g. rpicam-still).
 // Returns the JPEG bytes on success, or an error if the camera is busy/unavailable.
-func captureRPiCamStill() ([]byte, error) {
+func (sb *SnapshotBuffer) captureStill() ([]byte, error) {
+	if sb.stillBin == "" {
+		return nil, fmt.Errorf("still bin not configured (camera.still_bin)")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "rpicam-still",
+	cmd := exec.CommandContext(ctx, sb.stillBin,
 		"-o", "-",
 		"--nopreview",
 		"-t", "100", // 100ms timeout — fail fast if camera is busy
@@ -165,17 +173,17 @@ func captureRPiCamStill() ([]byte, error) {
 	cmd.Stderr = io.Discard
 
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("rpicam-still: %w", err)
+		return nil, fmt.Errorf("still bin %q: %w", sb.stillBin, err)
 	}
 
 	data := stdout.Bytes()
 	if len(data) < 100 {
-		return nil, fmt.Errorf("rpicam-still: output too small (%d bytes)", len(data))
+		return nil, fmt.Errorf("still bin %q: output too small (%d bytes)", sb.stillBin, len(data))
 	}
 
 	// Verify JPEG header (SOI marker 0xFFD8)
 	if len(data) < 2 || data[0] != 0xFF || data[1] != 0xD8 {
-		return nil, fmt.Errorf("rpicam-still: output is not JPEG (got 0x%02x 0x%02x)", data[0], data[1])
+		return nil, fmt.Errorf("still bin %q: output is not JPEG (got 0x%02x 0x%02x)", sb.stillBin, data[0], data[1])
 	}
 
 	return data, nil
@@ -184,11 +192,14 @@ func captureRPiCamStill() ([]byte, error) {
 // h264ToJPEG transcodes one Annex-B H.264 access unit into a single JPEG
 // frame via the ffmpeg binary (already a device dependency for the AI
 // keyframe decoder). Errors leave the caller to the raw-IDR tier.
-func h264ToJPEG(annexB []byte) ([]byte, error) {
+func (sb *SnapshotBuffer) h264ToJPEG(annexB []byte) ([]byte, error) {
+	if sb.ffmpegBin == "" {
+		return nil, fmt.Errorf("ffmpeg bin not configured (camera.ffmpeg_bin)")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "ffmpeg",
+	cmd := exec.CommandContext(ctx, sb.ffmpegBin,
 		"-loglevel", "error",
 		"-f", "h264", "-i", "pipe:0",
 		"-frames:v", "1", "-q:v", "3",

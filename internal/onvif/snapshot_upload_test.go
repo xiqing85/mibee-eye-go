@@ -24,7 +24,7 @@ func snapUploadFixture(t *testing.T) *SnapshotBuffer {
 	if _, err := exec.LookPath("rpicam-still"); err == nil {
 		t.Skip("rpicam-still present: tier 1 would win")
 	}
-	sb := NewSnapshotBuffer(true)
+	sb := NewSnapshotBuffer(true, "rpicam-still", "ffmpeg")
 	sb.Update(loadSnapshotFixture(t))
 	if !sb.HasFrame() {
 		t.Fatal("fixture produced no frame")
@@ -141,7 +141,7 @@ func TestSnapshotUploaderWithoutFramesFailsFast(t *testing.T) {
 	if _, err := exec.LookPath("rpicam-still"); err == nil {
 		t.Skip("rpicam-still present: tier 1 may capture a real frame")
 	}
-	sb := NewSnapshotBuffer(true) // never updated — no frame
+	sb := NewSnapshotBuffer(true, "rpicam-still", "ffmpeg") // never updated — no frame
 	up := &SnapshotUploader{SB: sb}
 	ids, err := up.Execute(context.Background(), manscdp.SnapShotCmd{SnapNum: 1, UploadURL: "http://x/u"})
 	if err == nil || ids != nil {

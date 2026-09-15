@@ -51,7 +51,7 @@ func newTestServer(t *testing.T) *httptest.Server {
 	cfg.Device.HardwareID = "IMX219"
 
 	pm := camera.NewParamManager(newMockCamera())
-	srv, err := New(cfg, testAdvertiseIP, pm, onvif.NewSnapshotBuffer(true))
+	srv, err := New(cfg, testAdvertiseIP, pm, onvif.NewSnapshotBuffer(true, "rpicam-still", "ffmpeg"))
 	if err != nil {
 		t.Fatalf("onvifgo.New: %v", err)
 	}

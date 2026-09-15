@@ -145,8 +145,8 @@ func WithInfo(info CameraInfo) RPiCameraOption {
 // NewRPiCamera creates a new RPiCamera with the given options.
 func NewRPiCamera(opts ...RPiCameraOption) *RPiCamera {
 	c := &RPiCamera{
-		params:          DefaultParams(),
-		binPath:         filepath.Join("deploy", "bin", "mtxrpicam"),
+		params: DefaultParams(),
+		// No invented bin default: main wires camera.bin_path from config.
 		frameBufferSize: 30,
 		maxBackoff:      30 * time.Second,
 		info: CameraInfo{

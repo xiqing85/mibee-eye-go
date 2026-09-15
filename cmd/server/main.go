@@ -233,11 +233,11 @@ func main() {
 		slog.Info("camera: using external RTSP source", "url", externalRTSPURL)
 		cam = camera.NewRTSPSource(externalRTSPURL, cameraParams, cameraInfo)
 	case "rpicamvid":
-		// Uses the system rpicam-vid binary (resolved via PATH). The
-		// configured bin_path stays pointed at mtxrpicam for fallback.
-		slog.Info("camera: using rpicam-vid subprocess")
+		// Uses the rpicam-vid binary from camera.vid_bin (PATH by default).
+		// The configured bin_path stays pointed at mtxrpicam for fallback.
+		slog.Info("camera: using rpicam-vid subprocess", "bin", cfg.Camera.VidBin)
 		cam = camera.NewRPiCamVidCamera(
-			camera.WithVidBinPath("rpicam-vid"),
+			camera.WithVidBinPath(cfg.Camera.VidBin),
 			camera.WithVidParams(cameraParams),
 			camera.WithVidInfo(cameraInfo),
 			camera.WithVidFrameBufferSize(cfg.Camera.FrameBufferSize),
@@ -251,6 +251,7 @@ func main() {
 		cam = camera.NewV4L2Source(
 			camera.WithV4L2Device(cfg.Camera.Device),
 			camera.WithV4L2EncoderDevice(cfg.Camera.EncoderDevice),
+			camera.WithV4L2FFmpegBin(cfg.Camera.FFmpegBin),
 			camera.WithV4L2Params(cameraParams),
 			camera.WithV4L2Info(cameraInfo),
 		)
@@ -275,7 +276,7 @@ func main() {
 	auHub.StartDropLogger(ctx)
 
 	// SnapshotBuffer for /snapshot endpoint
-	snapshotBuffer := onvif.NewSnapshotBuffer(true)
+	snapshotBuffer := onvif.NewSnapshotBuffer(true, cfg.Camera.StillBin, cfg.Camera.FFmpegBin)
 	go snapshotBuffer.SubscribeToHub(ctx, auHub)
 
 	go func() {

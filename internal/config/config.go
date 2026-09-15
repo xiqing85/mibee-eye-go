@@ -31,6 +31,9 @@ type CameraConfig struct {
 	Sharpness       float64       `yaml:"sharpness"`         // 0.0 to 16.0
 	IDRPeriod       int           `yaml:"idr_period"`        // Keyframe interval (1=every frame, 15=every 15th)
 	BinPath         string        `yaml:"bin_path"`          // Path to mtxrpicam binary
+	FFmpegBin       string        `yaml:"ffmpeg_bin"`        // ffmpeg binary (v4l2 fallback encoder, snapshot transcode)
+	StillBin        string        `yaml:"still_bin"`         // still-capture binary (rpicam-still) for /snapshot JPEG tier
+	VidBin          string        `yaml:"vid_bin"`           // rpicam-vid binary (camera.mode: rpicamvid)
 	FrameBufferSize int           `yaml:"frame_buffer_size"` // Frame channel buffer capacity
 	MaxBackoff      time.Duration `yaml:"max_backoff"`       // Max subprocess restart backoff
 	HFlip           bool          `yaml:"hflip"`             // Device-level horizontal mirror (baked into the encoded stream)
@@ -202,6 +205,9 @@ func DefaultConfig() *Config {
 			Sharpness:       1.0,
 			IDRPeriod:       15,
 			BinPath:         "deploy/bin/mtxrpicam",
+			FFmpegBin:       "ffmpeg",
+			StillBin:        "rpicam-still",
+			VidBin:          "rpicam-vid",
 			FrameBufferSize: 30,
 			MaxBackoff:      30 * time.Second,
 			HFlip:           false,
@@ -337,6 +343,9 @@ func applyEnvOverrides(cfg *Config) {
 	overrideFloat("MIBEE_EYE_CAMERA_SHARPNESS", &cfg.Camera.Sharpness)
 	overrideInt("MIBEE_EYE_CAMERA_IDR_PERIOD", &cfg.Camera.IDRPeriod)
 	overrideString("MIBEE_EYE_CAMERA_BIN_PATH", &cfg.Camera.BinPath)
+	overrideString("MIBEE_EYE_CAMERA_FFMPEG_BIN", &cfg.Camera.FFmpegBin)
+	overrideString("MIBEE_EYE_CAMERA_STILL_BIN", &cfg.Camera.StillBin)
+	overrideString("MIBEE_EYE_CAMERA_VID_BIN", &cfg.Camera.VidBin)
 	overrideInt("MIBEE_EYE_CAMERA_FRAME_BUFFER_SIZE", &cfg.Camera.FrameBufferSize)
 	overrideDuration("MIBEE_EYE_CAMERA_MAX_BACKOFF", &cfg.Camera.MaxBackoff)
 	// RTSP section

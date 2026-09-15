@@ -38,6 +38,15 @@ logging: {}
 	if cfg.Camera.Device != "/dev/video0" {
 		t.Errorf("Camera.Device = %q, want %q", cfg.Camera.Device, "/dev/video0")
 	}
+	if cfg.Camera.FFmpegBin != "ffmpeg" {
+		t.Errorf("Camera.FFmpegBin = %q, want %q", cfg.Camera.FFmpegBin, "ffmpeg")
+	}
+	if cfg.Camera.StillBin != "rpicam-still" {
+		t.Errorf("Camera.StillBin = %q, want %q", cfg.Camera.StillBin, "rpicam-still")
+	}
+	if cfg.Camera.VidBin != "rpicam-vid" {
+		t.Errorf("Camera.VidBin = %q, want %q", cfg.Camera.VidBin, "rpicam-vid")
+	}
 	if cfg.Camera.Width != 1280 {
 		t.Errorf("Camera.Width = %d, want %d", cfg.Camera.Width, 1280)
 	}
@@ -264,6 +273,9 @@ func TestEnvOverride(t *testing.T) {
 	t.Setenv("MIBEE_EYE_ONVIF_USERNAME", "envonvif")
 	t.Setenv("MIBEE_EYE_ONVIF_PASSWORD", "envonvifpass")
 	t.Setenv("MIBEE_EYE_CAMERA_DEVICE", "/dev/videoEnv")
+	t.Setenv("MIBEE_EYE_CAMERA_FFMPEG_BIN", "/opt/ffmpeg")
+	t.Setenv("MIBEE_EYE_CAMERA_STILL_BIN", "/opt/rpicam-still")
+	t.Setenv("MIBEE_EYE_CAMERA_VID_BIN", "/opt/rpicam-vid")
 	t.Setenv("MIBEE_EYE_CAMERA_CODEC", "h265")
 	t.Setenv("MIBEE_EYE_CAMERA_BITRATE", "5000000")
 	t.Setenv("MIBEE_EYE_DEVICE_NAME", "Env Camera")
@@ -300,6 +312,15 @@ logging:
 	}
 	if cfg.Camera.Device != "/dev/videoEnv" {
 		t.Errorf("Camera.Device = %q, want /dev/videoEnv (env override)", cfg.Camera.Device)
+	}
+	if cfg.Camera.FFmpegBin != "/opt/ffmpeg" {
+		t.Errorf("Camera.FFmpegBin = %q, want /opt/ffmpeg (env override)", cfg.Camera.FFmpegBin)
+	}
+	if cfg.Camera.StillBin != "/opt/rpicam-still" {
+		t.Errorf("Camera.StillBin = %q, want /opt/rpicam-still (env override)", cfg.Camera.StillBin)
+	}
+	if cfg.Camera.VidBin != "/opt/rpicam-vid" {
+		t.Errorf("Camera.VidBin = %q, want /opt/rpicam-vid (env override)", cfg.Camera.VidBin)
 	}
 	if cfg.Camera.Height != 480 {
 		t.Errorf("Camera.Height = %d, want 480 (env override)", cfg.Camera.Height)

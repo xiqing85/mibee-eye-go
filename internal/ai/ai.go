@@ -88,7 +88,7 @@ func (o *Options) withDefaults() Options {
 		c.IntervalMs = 1000
 	}
 	if c.DecoderBin == "" {
-		c.DecoderBin = "ffmpeg"
+		c.DecoderBin = "ffmpeg" // hardcode-ok: mirror of config default (ai.decoder_bin)
 	}
 	return c
 }
