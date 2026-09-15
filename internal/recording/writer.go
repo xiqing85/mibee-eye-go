@@ -57,6 +57,7 @@ type Writer struct {
 	segBytes     int64
 	segRollAt    time.Time // earliest time at which a keyframe triggers roll
 	active       bool      // reflects recording state for DeviceStatus <Record>
+	paused       bool      // GB RecordCmd StopRecord: drop AUs until Record
 }
 
 // NewWriter creates a Writer for the given hub and recording config.
@@ -78,6 +79,25 @@ func (w *Writer) Active() bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.active
+}
+
+// SetPaused gates segment writing (GB RecordCmd StopRecord pauses,
+// Record resumes at a fresh segment boundary).
+func (w *Writer) SetPaused(paused bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.paused == paused {
+		return
+	}
+	w.paused = paused
+	if paused && w.segFile != nil {
+		// Close the open segment so the pause boundary is a clean file
+		// edge; resuming opens a fresh one at the next keyframe.
+		if err := w.closeSegmentLocked(); err != nil {
+			slog.Error("recording: close segment on pause failed", "error", err)
+		}
+	}
+	slog.Info("recording: paused state changed", "paused", paused)
 }
 
 // Run starts the recording loop. It blocks until ctx is cancelled.
@@ -177,6 +197,11 @@ func (w *Writer) pop() (h264.AccessUnit, bool) {
 func (w *Writer) handleAU(au h264.AccessUnit) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+
+	// Platform-requested pause (GB RecordCmd StopRecord): drop AUs.
+	if w.paused {
+		return
+	}
 
 	// If we have no open segment, start one (first AU or after a roll).
 	if w.segFile == nil {

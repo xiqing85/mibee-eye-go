@@ -586,6 +586,17 @@ func main() {
 					slog.Warn("gb28181: IFrameCmd force IDR failed", "error", err)
 				}
 			},
+			// GB/T 28181 RecordCmd (§9.3.2): platform-requested manual
+			// recording. StopRecord pauses the (config-enabled) recorder's
+			// segment writing; Record resumes at a fresh segment boundary.
+			// With recording disabled there is no writer to gate — logged.
+			OnRecordCmd: func(start bool) {
+				if recWriter == nil {
+					slog.Warn("gb28181: RecordCmd ignored — recording disabled in config")
+					return
+				}
+				recWriter.SetPaused(!start)
+			},
 		})
 		go func() {
 			if err := gbServer.Start(ctx); err != nil {
