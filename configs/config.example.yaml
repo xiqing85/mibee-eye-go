@@ -10,6 +10,12 @@ camera:
   # "rpicamvid" (system rpicam-vid, Pi CSI), "rtsp" (external RTSP source),
   # "v4l2" (generic V4L2 capture — any board, USB/UVC included)
   mode: mtxrpicam
+  # ffmpeg binary: v4l2-mode fallback encoder + /snapshot transcode tier
+  ffmpeg_bin: ffmpeg
+  # still-capture binary for the /snapshot JPEG tier (Pi CSI; rpicam-still)
+  still_bin: rpicam-still
+  # rpicam-vid binary for camera.mode: rpicamvid (PATH by default)
+  vid_bin: rpicam-vid
   # V4L2 M2M encoder node for mode=v4l2 (bcm2835-codec-encode on Pi;
   # configure per SoC). Falls back to an ffmpeg subprocess when the node
   # is absent or not M2M-capable.

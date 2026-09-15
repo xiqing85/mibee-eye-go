@@ -61,7 +61,7 @@ func TestSnapshotJpegViaFFmpegTranscode(t *testing.T) {
 		t.Skip("rpicam-still present: tier 1 would win, not exercising the transcode tier")
 	}
 
-	sb := NewSnapshotBuffer(true)
+	sb := NewSnapshotBuffer(true, "rpicam-still", "ffmpeg")
 	sb.Update(loadSnapshotFixture(t))
 
 	data, contentType, err := sb.Snapshot()
@@ -86,7 +86,7 @@ func TestSnapshotFallsBackToRawIDRWhenTranscodeFails(t *testing.T) {
 		t.Skip("rpicam-still present: tier 1 would win")
 	}
 
-	sb := NewSnapshotBuffer(true)
+	sb := NewSnapshotBuffer(true, "rpicam-still", "ffmpeg")
 	sb.Update(h264.AccessUnit{
 		KeyFrame: true,
 		NALUs: []h264.NALU{

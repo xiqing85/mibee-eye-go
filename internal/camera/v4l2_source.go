@@ -66,13 +66,13 @@ type captureDevice interface {
 // V4L2 functional options, mirroring the other backends.
 type V4L2Option func(*V4L2Source)
 
-// WithV4L2Device sets the capture node (default /dev/video0).
+// WithV4L2Device sets the capture node (required; default lives in config).
 func WithV4L2Device(path string) V4L2Option {
 	return func(s *V4L2Source) { s.device = path }
 }
 
-// WithV4L2EncoderDevice sets the M2M encoder node to probe (default
-// /dev/video11).
+// WithV4L2EncoderDevice sets the M2M encoder node to probe (required;
+// default lives in config).
 func WithV4L2EncoderDevice(path string) V4L2Option {
 	return func(s *V4L2Source) { s.encoderDevice = path }
 }
@@ -87,7 +87,8 @@ func WithV4L2Info(i CameraInfo) V4L2Option {
 	return func(s *V4L2Source) { s.info = i }
 }
 
-// WithV4L2FFmpegBin overrides the ffmpeg binary (default "ffmpeg").
+// WithV4L2FFmpegBin sets the ffmpeg binary for the fallback encoder
+// (required when the ffmpeg path is taken; default lives in config).
 func WithV4L2FFmpegBin(bin string) V4L2Option {
 	return func(s *V4L2Source) { s.ffmpegBin = bin }
 }
@@ -110,13 +111,12 @@ func WithV4L2M2M(f func(path string, w, h uint32) (frameEncoder, error)) V4L2Opt
 // NewV4L2Source builds the backend from options.
 func NewV4L2Source(opts ...V4L2Option) *V4L2Source {
 	s := &V4L2Source{
-		device:        "/dev/video0",
-		encoderDevice: "/dev/video11",
-		ffmpegBin:     "ffmpeg",
-		framesCh:      make(chan Frame, 30),
-		memParams:     map[string]interface{}{},
-		stopCh:        make(chan struct{}),
-		probeEncoder:  v4l2.ProbeEncoder,
+		// No invented defaults: main wires every value from config
+		// (camera.device / camera.encoder_device / camera.ffmpeg_bin).
+		framesCh:     make(chan Frame, 30),
+		memParams:    map[string]interface{}{},
+		stopCh:       make(chan struct{}),
+		probeEncoder: v4l2.ProbeEncoder,
 		openCapture: func(path string, w, h uint32) (captureDevice, error) {
 			return v4l2.OpenCapture(path, w, h)
 		},
@@ -170,6 +170,9 @@ func (s *V4L2Source) Start(ctx context.Context) error {
 	w := uint32(s.params.Width)
 	h := uint32(s.params.Height)
 
+	if s.device == "" {
+		return fmt.Errorf("v4l2 source: capture device not configured (camera.device)")
+	}
 	cap, err := s.openCapture(s.device, w, h)
 	if err != nil {
 		return fmt.Errorf("v4l2 source: capture: %w", err)

@@ -36,6 +36,17 @@ Use conventional commits:
 6. Ensure CI checks pass (build / vet / tests / repo hygiene gate)
 7. Address review feedback
 
+## No Hardcoded Values
+
+Deployment-relevant values — device paths, addresses, external binary
+names, device IDs, version strings — must come from configuration; the
+single place a default may be declared is the config module
+(`src/config/` in Rust, `internal/config/` in Go). Business code reads
+config and never invents defaults. Tests are exempt (golden semantics).
+`tools/check-hardcode.sh` gates this in CI; a genuinely semantic
+constant gets a same-line `hardcode-ok: <reason>` annotation, justified
+in the commit message.
+
 ## Release Cadence
 
 Releases follow a split rule across the two MiBee Eye implementations
