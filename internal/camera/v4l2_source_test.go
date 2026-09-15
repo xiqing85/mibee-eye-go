@@ -164,3 +164,56 @@ func TestFFmpegReadLoopHandlesPartialChunks(t *testing.T) {
 	e.wg.Add(1)                            // pair readLoop's Done when driven directly
 	e.readLoop(func([]h264.NALU, bool) {}) // drain, no panic
 }
+
+// ── ForceIDR (DeviceControl IFrameCmd wiring) ────────────────────────────
+
+type keyframeEncoder struct {
+	fakeEncoder
+	requests int
+	err      error
+}
+
+func (k *keyframeEncoder) RequestKeyframe() error {
+	k.requests++
+	return k.err
+}
+
+// ForceIDR forwards to an encoder implementing RequestKeyframe.
+func TestV4L2ForceIDRForwardsToEncoder(t *testing.T) {
+	enc := &keyframeEncoder{fakeEncoder: fakeEncoder{name: "m2m-stub"}}
+	s := newTestSource(
+		func(string) (v4l2.ProbeResult, error) {
+			return v4l2.ProbeResult{M2MCapable: true}, nil
+		},
+		func(string, uint32, uint32) (frameEncoder, error) { return enc, nil },
+	)
+	if err := s.Start(context.Background()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer s.Stop()
+	if err := s.ForceIDR(); err != nil {
+		t.Fatalf("ForceIDR: %v", err)
+	}
+	if enc.requests != 1 {
+		t.Fatalf("requests = %d", enc.requests)
+	}
+}
+
+// ffmpeg-fallback encoders (no RequestKeyframe) report unsupported —
+// the GB control logs once instead of failing the command silently.
+func TestV4L2ForceIDRUnsupportedWithoutM2M(t *testing.T) {
+	enc := &fakeEncoder{name: "ffmpeg-fallback"}
+	s := newTestSource(
+		func(string) (v4l2.ProbeResult, error) {
+			return v4l2.ProbeResult{M2MCapable: true}, nil
+		},
+		func(string, uint32, uint32) (frameEncoder, error) { return enc, nil },
+	)
+	if err := s.Start(context.Background()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer s.Stop()
+	if err := s.ForceIDR(); err == nil {
+		t.Fatal("ForceIDR must report unsupported")
+	}
+}

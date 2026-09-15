@@ -38,6 +38,7 @@ func (c *noOpCamera) GetParam(name string) (interface{}, error) {
 		return nil, nil
 	}
 }
+
 func (c *noOpCamera) Info() camera.CameraInfo {
 	return camera.CameraInfo{}
 }

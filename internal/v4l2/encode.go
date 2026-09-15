@@ -186,6 +186,20 @@ func (e *M2MEncoder) Encode(yuv []byte) ([]byte, error) {
 }
 
 // Close stops the encoder and releases the device.
+// RequestKeyframe asks the driver to encode the next frame as a
+// keyframe (V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME). Unlike Encode it is
+// safe to call from another goroutine: it issues an independent ioctl
+// on the fd and the kernel serializes ioctls per open file. Drivers
+// without the control return an error — callers decide whether that is
+// fatal.
+func (e *M2MEncoder) RequestKeyframe() error {
+	ctrl := v4l2Control{id: cidForceKeyFrame, value: 1}
+	if err := ioctl(e.file.Fd(), vidiocSCtrl, unsafe.Pointer(&ctrl)); err != nil {
+		return fmt.Errorf("v4l2: FORCE_KEY_FRAME: %w", err)
+	}
+	return nil
+}
+
 func (e *M2MEncoder) Close() {
 	if e.closed || e.file == nil {
 		return

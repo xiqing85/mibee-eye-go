@@ -215,6 +215,22 @@ func (s *V4L2Source) Start(ctx context.Context) error {
 }
 
 // Stop implements Camera.
+
+// ForceIDR asks the active encoder to make the next frame a keyframe
+// (DeviceControl IFrameCmd Send, GB/T 28181 §9.3.2). Only the in-process
+// M2M encoder supports it — the ffmpeg fallback and non-v4l2 sources
+// return ErrUnsupported.
+func (s *V4L2Source) ForceIDR() error {
+	enc := s.encoder
+	if enc == nil {
+		return fmt.Errorf("camera: not started")
+	}
+	if rk, ok := enc.(interface{ RequestKeyframe() error }); ok {
+		return rk.RequestKeyframe()
+	}
+	return fmt.Errorf("camera: encoder %s does not support runtime IDR requests", enc.Name())
+}
+
 func (s *V4L2Source) Stop() error {
 	select {
 	case <-s.stopCh:
@@ -291,6 +307,10 @@ type m2mEncoder struct {
 }
 
 func (m *m2mEncoder) Name() string { return "v4l2-m2m" }
+
+// RequestKeyframe forwards to the M2M encoder's FORCE_KEY_FRAME
+// control ( DeviceControl IFrameCmd wiring).
+func (m *m2mEncoder) RequestKeyframe() error { return m.enc.RequestKeyframe() }
 
 func (m *m2mEncoder) Encode(yuv []byte, pts uint64) error {
 	au, err := m.enc.Encode(yuv)
