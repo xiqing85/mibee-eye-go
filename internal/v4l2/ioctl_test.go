@@ -99,3 +99,17 @@ func TestFormatUnionOverlap(t *testing.T) {
 		t.Fatalf("mplane view roundtrip failed")
 	}
 }
+
+// VIDIOC_S_CTRL (nr 3, struct v4l2_control = 8 bytes) and the
+// FORCE_KEY_FRAME CID are pinned to the 64-bit UABI values — the
+// RequestKeyframe path depends on both.
+func TestVidiocSCtrlAndForceKeyFrameCID(t *testing.T) {
+	if vidiocSCtrl != ioc(_IOCWrite, 3, 8) {
+		t.Fatalf("vidiocSCtrl = %#x", vidiocSCtrl)
+	}
+	// V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME = V4L2_CID_CODEC_BASE+229
+	// (V4L2_CTRL_CLASS_CODEC|0x900 = 0x990900).
+	if cidForceKeyFrame != 0x990900+229 {
+		t.Fatalf("cidForceKeyFrame = %#x", cidForceKeyFrame)
+	}
+}

@@ -281,6 +281,7 @@ func TestSupportedParamKind(t *testing.T) {
 		t.Errorf("error message format mismatch:\n  got:  %s\n  want: %s", err.Error(), expected)
 	}
 }
+
 func TestDeserializeParamValue(t *testing.T) {
 	original := "normal"
 	encoded := base64.StdEncoding.EncodeToString([]byte(original))
@@ -532,7 +533,7 @@ func main() {
 	}
 }
 `
-	if err := os.WriteFile(mockSrc, []byte(mockCode), 0644); err != nil {
+	if err := os.WriteFile(mockSrc, []byte(mockCode), 0o644); err != nil {
 		t.Fatalf("write mock source: %v", err)
 	}
 
@@ -823,7 +824,7 @@ func main() {
 	syscall.Close(videoFD)
 }
 `
-	if err := os.WriteFile(mockSrc, []byte(mockCode), 0644); err != nil {
+	if err := os.WriteFile(mockSrc, []byte(mockCode), 0o644); err != nil {
 		t.Fatalf("write mock source: %v", err)
 	}
 
