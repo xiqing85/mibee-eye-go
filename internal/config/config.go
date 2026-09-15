@@ -144,6 +144,13 @@ type GB28181Config struct {
 	// AlarmCooldownSecs is the minimum spacing between AI alarm NOTIFYs
 	// (rising-edge anti-storm).
 	AlarmCooldownSecs int `yaml:"alarm_cooldown_secs"`
+
+	// Surveyed coordinates reported as MobilePosition NOTIFYs while a
+	// platform holds a position subscription (GB 度分秒 string form,
+	// e.g. "1163942.55E" / "395436.30N"; carried verbatim). Both keys
+	// must be set to install the position source.
+	Longitude string `yaml:"longitude"`
+	Latitude  string `yaml:"latitude"`
 }
 
 // GB35114Config holds GB 35114 A-level security settings. When enabled,

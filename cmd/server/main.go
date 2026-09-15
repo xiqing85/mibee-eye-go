@@ -19,6 +19,7 @@ import (
 	"github.com/xiqing85/mibee-eye-go/internal/config"
 	"github.com/xiqing85/mibee-eye-go/internal/gb35114auth"
 	"github.com/xiqing85/mibee-eye-go/internal/gbalarm"
+	"github.com/xiqing85/mibee-eye-go/internal/gbposition"
 	"github.com/xiqing85/mibee-eye-go/internal/h264"
 	"github.com/xiqing85/mibee-eye-go/internal/hls"
 	"github.com/xiqing85/mibee-eye-go/internal/metrics"
@@ -545,6 +546,25 @@ func main() {
 				OnAlarmReport: func(motion, field uint32) {
 					alarmBridge.SetMotionReporting(motion == 1)
 				},
+				OnFrameMirror: func(mode uint32) {
+					h, v := gbalarm.MirrorModeToFlips(mode)
+					if err := cam.SetParam("hFlip", h); err != nil {
+						slog.Warn("gb28181: FrameMirror hFlip", "error", err)
+					}
+					if err := cam.SetParam("vFlip", v); err != nil {
+						slog.Warn("gb28181: FrameMirror vFlip", "error", err)
+					}
+					slog.Info("gb28181: FrameMirror applied",
+						"mode", mode, "hFlip", h, "vFlip", v)
+				},
+			})
+		}
+		// Static surveyed coordinates → MobilePosition NOTIFYs (§9.5.3)
+		// while a platform subscribes; unset = no source.
+		if cfg.GB28181.Longitude != "" && cfg.GB28181.Latitude != "" {
+			gbServer.SetPositionSource(&gbposition.StaticPosition{
+				Longitude: cfg.GB28181.Longitude,
+				Latitude:  cfg.GB28181.Latitude,
 			})
 		}
 		// DeviceControl(IFrameCmd Send): force an IDR on the next encoded
