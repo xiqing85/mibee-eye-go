@@ -421,3 +421,42 @@ func TestReader_SidecarFallbackFPS(t *testing.T) {
 		t.Fatalf("expected nominal PTS 80ms for 3rd frame, got %v", pts)
 	}
 }
+
+// GB RecordCmd semantics: SetPaused(true) drops AUs (and closes the open
+// segment at a clean edge); SetPaused(false) resumes with a fresh
+// segment at the next keyframe.
+func TestWriter_PauseGate(t *testing.T) {
+	dir := t.TempDir()
+	cfg := testCfg(dir)
+	hub := h264.NewAUHubWithSize(64)
+	w := NewWriter(hub, cfg)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- w.Run(ctx) }()
+	waitForSubscriber(t, hub)
+
+	// First keyframe opens segment 1.
+	hub.Write(syntheticAU(time.Now(), true, 5))
+	time.Sleep(100 * time.Millisecond)
+
+	// Pause: the subsequent keyframe is dropped.
+	w.SetPaused(true)
+	hub.Write(syntheticAU(time.Now(), true, 5))
+	time.Sleep(200 * time.Millisecond)
+	if got := len(w.Index().Snapshot()); got != 1 {
+		t.Fatalf("segments while paused = %d, want 1", got)
+	}
+
+	// Resume: the next keyframe opens a fresh segment (appended to the
+	// index when it closes at shutdown).
+	w.SetPaused(false)
+	hub.Write(syntheticAU(time.Now(), true, 5))
+	time.Sleep(200 * time.Millisecond)
+
+	cancel()
+	<-done
+	if got := len(w.Index().Snapshot()); got != 2 {
+		t.Fatalf("segments = %d, want 2 (paused AU must not record)", got)
+	}
+}
