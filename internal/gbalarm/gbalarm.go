@@ -119,3 +119,20 @@ func buildAlarm(nowMs int64, targetCount int) alarmFields {
 		description: fmt.Sprintf("AI moving-target detection: %d target(s)", targetCount),
 	}
 }
+
+// MirrorModeToFlips maps the A.2.1.22 frameMirrorCfgType mode onto
+// device flips: 0 不启用, 1 水平镜像 (hflip), 2 上下镜像 (vflip),
+// 3 中心镜像 (both). Anything else leaves the frames untouched
+// (defensive — the library only decodes 0-3).
+func MirrorModeToFlips(mode uint32) (hFlip, vFlip bool) {
+	switch mode {
+	case 1:
+		return true, false
+	case 2:
+		return false, true
+	case 3:
+		return true, true
+	default:
+		return false, false
+	}
+}
