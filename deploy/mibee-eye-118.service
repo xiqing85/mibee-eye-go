@@ -1,7 +1,8 @@
 # MiBee Eye (Go) — systemd unit for the alternate host (rpi3b-cam).
 #
 # Device layout on this host differs from the canonical ~/mibee-eye
-# layout in mibee-eye.service: binary ~/rpi3b-cam/rpi3b-cam-arm64,
+# layout in mibee-eye.service: binary ~/rpi3b-cam/mibee-eye (the packaged
+# name — never a host-specific binary name),
 # config ~/rpi3b-cam/configs/config.yaml (the -config flag default is
 # relative to WorkingDirectory), recordings under ~/rpi3b-cam/recordings.
 # Camera mode is rpicamvid (system rpicam-vid) — no LD_LIBRARY_PATH needed.
@@ -10,7 +11,7 @@
 #   scp deploy/mibee-eye-118.service pi@192.168.1.100:/tmp/
 #   ssh pi@192.168.1.100 'sudo mv /tmp/mibee-eye-118.service /etc/systemd/system/mibee-eye.service && sudo systemctl daemon-reload && sudo systemctl enable --now mibee-eye'
 [Unit]
-Description=MiBee Eye - ONVIF Camera Server (Go, rpi3b-cam)
+Description=MiBee Eye - ONVIF Camera Server (Go)
 After=network-online.target
 Wants=network-online.target
 # Deliberate self-restarts (config save; imaging flips bake into the
@@ -23,7 +24,7 @@ Type=simple
 User=pi
 Group=pi
 WorkingDirectory=/home/pi/rpi3b-cam
-ExecStart=/home/pi/rpi3b-cam/rpi3b-cam-arm64
+ExecStart=/home/pi/rpi3b-cam/mibee-eye
 Restart=always
 RestartSec=5
 # Camera access (rpicam-vid / /dev/video0).
