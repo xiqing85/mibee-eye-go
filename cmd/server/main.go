@@ -547,6 +547,26 @@ func main() {
 				},
 			})
 		}
+		// DeviceControl(IFrameCmd Send): force an IDR on the next encoded
+		// frame when the active source supports it (v4l2 mode's M2M
+		// encoder does; subprocess sources like rpicamvid cannot be
+		// signaled mid-stream and log once).
+		var idrUnsupportedLogged bool
+		gbServer.SetControlHandlers(gbdev.ControlCallbacks{
+			OnForceIFrame: func() {
+				forcer, ok := cam.(interface{ ForceIDR() error })
+				if !ok {
+					if !idrUnsupportedLogged {
+						idrUnsupportedLogged = true
+						slog.Warn("gb28181: IFrameCmd ignored — camera source does not support runtime IDR requests")
+					}
+					return
+				}
+				if err := forcer.ForceIDR(); err != nil {
+					slog.Warn("gb28181: IFrameCmd force IDR failed", "error", err)
+				}
+			},
+		})
 		go func() {
 			if err := gbServer.Start(ctx); err != nil {
 				slog.Error("gb28181 server", "error", err)

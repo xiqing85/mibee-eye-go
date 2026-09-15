@@ -204,6 +204,12 @@ func (p *V4l2Plane) memOffset() uint32 {
 	return uint32(p.M[0]) | uint32(p.M[1])<<8 | uint32(p.M[2])<<16 | uint32(p.M[3])<<24
 }
 
+// v4l2Control mirrors `struct v4l2_control` (driver control set).
+type v4l2Control struct {
+	id    uint32
+	value int32
+}
+
 // ioctl request codes, computed from struct sizes.
 var (
 	vidiocQuerycap  = ioc(_IOCRead, 0, uint32(unsafe.Sizeof(V4l2Capability{})))
@@ -214,7 +220,13 @@ var (
 	vidiocDQBuf     = ioc(_IOCRead|_IOCWrite, 17, uint32(unsafe.Sizeof(V4l2Buffer{})))
 	vidiocStreamon  = ioc(_IOCWrite, 18, 4)
 	vidiocStreamoff = ioc(_IOCWrite, 19, 4)
+	// struct v4l2_control { u32 id; i32 value } = 8 bytes.
+	vidiocSCtrl = ioc(_IOCWrite, 3, 8)
 )
+
+// V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME (v4l2-controls.h:
+// V4L2_CID_CODEC_BASE+229 — the 64-bit UABI value, pinned by test).
+const cidForceKeyFrame = 0x9909E5
 
 func ioctl(fd uintptr, req uint32, arg unsafe.Pointer) error {
 	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, fd, uintptr(req), uintptr(arg))
