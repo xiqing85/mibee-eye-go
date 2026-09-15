@@ -18,6 +18,7 @@ import (
 	"github.com/xiqing85/mibee-eye-go/internal/camera"
 	"github.com/xiqing85/mibee-eye-go/internal/config"
 	"github.com/xiqing85/mibee-eye-go/internal/gb35114auth"
+	"github.com/xiqing85/mibee-eye-go/internal/gbalarm"
 	"github.com/xiqing85/mibee-eye-go/internal/h264"
 	"github.com/xiqing85/mibee-eye-go/internal/hls"
 	"github.com/xiqing85/mibee-eye-go/internal/metrics"
@@ -344,6 +345,20 @@ func main() {
 		VideoW:              uint32(cfg.Camera.Width),
 		VideoH:              uint32(cfg.Camera.Height),
 	}, auHub, ai.NewDetector)
+	// AI → GB alarm NOTIFY bridge (§9.5): exists only when both AI and
+	// GB28181 run; the sender is attached once the GB server exists
+	// (Step 6.5). No platform subscription → no-ops.
+	var alarmBridge *gbalarm.Bridge
+	if aiService != nil && cfg.GB28181.Enabled {
+		alarmBridge = gbalarm.New(cfg.GB28181.AlarmNotifyEnabled,
+			time.Duration(cfg.GB28181.AlarmCooldownSecs)*time.Second)
+		events := aiService.Events()
+		go func() {
+			for ev := range events {
+				alarmBridge.OnDetections(time.Now().UnixMilli(), len(ev.Detections))
+			}
+		}()
+	}
 	if aiService != nil {
 		aiService.Start(ctx)
 	}
@@ -523,6 +538,15 @@ func main() {
 		// capture via the /snapshot tiers, POST each JPEG to the
 		// command's UploadURL; the library reports completion.
 		gbServer.SetSnapshotExecutor(&onvif.SnapshotUploader{SB: snapshotBuffer})
+		// AI alarms + the DeviceConfig(AlarmReport) runtime gate.
+		if alarmBridge != nil {
+			alarmBridge.SetSender(gbServer.Notifier())
+			gbServer.SetConfigHandlers(gbdev.ConfigCallbacks{
+				OnAlarmReport: func(motion, field uint32) {
+					alarmBridge.SetMotionReporting(motion == 1)
+				},
+			})
+		}
 		go func() {
 			if err := gbServer.Start(ctx); err != nil {
 				slog.Error("gb28181 server", "error", err)
