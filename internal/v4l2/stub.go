@@ -33,6 +33,11 @@ type M2MEncoder struct{}
 // Encode always errors on 32-bit builds.
 func (*M2MEncoder) Encode(yuv []byte) ([]byte, error) { return nil, errUnsupported32 }
 
+// RequestKeyframe satisfies the 64-bit encoder's force-IDR seam on the
+// 32-bit stub (the arm64 implementation issues
+// V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME; 32-bit M2M is unsupported anyway).
+func (*M2MEncoder) RequestKeyframe() error { return errUnsupported32 }
+
 // Close is a no-op on 32-bit builds.
 func (*M2MEncoder) Close() {}
 
