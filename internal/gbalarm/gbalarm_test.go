@@ -151,3 +151,21 @@ func TestMirrorModeToFlips(t *testing.T) {
 		}
 	}
 }
+
+// The SPEC v1 §6 `alarm` SSE sink fires on every accepted rising edge —
+// including when no notifier is attached (platform delivery separate).
+func TestAcceptedEdgeFiresEventSink(t *testing.T) {
+	b := New(true, 30*time.Second)
+	var got []int
+	b.SetEventSink(func(nowMs int64, targets int) { got = append(got, targets) })
+	if b.OnDetections(1_000, 2) {
+		t.Fatal("no sender attached — NOTIFY must not go out")
+	}
+	if len(got) != 1 || got[0] != 2 {
+		t.Fatalf("sink fired %v, want [2]", got)
+	}
+	// Cooldown-suppressed edge must not re-fire.
+	if b.OnDetections(2_000, 3) || len(got) != 1 {
+		t.Fatalf("cooldown must suppress both NOTIFY and sink: %v", got)
+	}
+}
