@@ -104,6 +104,12 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 	if aiModels {
 		events = append(events, "ai_model_changed")
 	}
+	// SPEC v1 §6 `alarm`: the AI→GB28181 alarm bridge's rising edges
+	// also reach the SSE hub (advertised with GB28181 enabled — the
+	// bridge exists only then; the event additionally requires AI on).
+	if s.cfg.GB28181Config != nil && s.cfg.GB28181Config.Enabled {
+		events = append(events, "alarm")
+	}
 	caps := map[string]interface{}{
 		"spec_version":      "1",
 		"auth":              map[string]interface{}{"model": "session", "setup": true},

@@ -419,6 +419,21 @@ func main() {
 			Snapshot:          snapshotBuffer,
 			Metrics:           metricsCollector,
 		})
+		// SPEC v1 §6 `alarm` SSE: the GB28181 alarm bridge's accepted
+		// rising edges also reach the web event hub (web disabled → no
+		// listener installed, the NOTIFY path is unaffected).
+		if alarmBridge != nil {
+			hub := webServer
+			alarmBridge.SetEventSink(func(nowMs int64, targets int) {
+				hub.BroadcastEvent("alarm", map[string]any{
+					"camera_id": "0",
+					"active":    true,
+					"source":    "ai",
+					"targets":   targets,
+					"timestamp": nowMs,
+				})
+			})
+		}
 		// Observability (SPEC §3.2): resource snapshot sampler + log ring.
 		go webServer.Observe().RunSampler(ctx, 2*time.Second)
 		go func() {

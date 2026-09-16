@@ -38,6 +38,9 @@ type Bridge struct {
 	// Epoch-ms of the last accepted alarm; negative = never.
 	lastSentMs atomic.Int64
 	cooldownMs int64
+	// onEdge is the optional rising-edge listener (epoch-ms, target
+	// count) for the web SSE alarm event.
+	onEdge atomic.Pointer[func(nowMs int64, targets int)]
 }
 
 // New builds the bridge; enabled is the boot default of the
@@ -47,6 +50,13 @@ func New(enabled bool, cooldown time.Duration) *Bridge {
 	b.motionReporting.Store(enabled)
 	b.lastSentMs.Store(-1)
 	return b
+}
+
+// SetEventSink installs the rising-edge listener (SPEC v1 §6 `alarm`
+// SSE event) — same accepted-edge source as the NOTIFY, independent of
+// platform delivery.
+func (b *Bridge) SetEventSink(f func(nowMs int64, targets int)) {
+	b.onEdge.Store(&f)
 }
 
 // SetSender installs the live notifier (the GB28181 server owns it).
@@ -71,6 +81,11 @@ func (b *Bridge) SetMotionReporting(on bool) {
 func (b *Bridge) OnDetections(nowMs int64, targetCount int) bool {
 	if !b.takeEdge(nowMs, targetCount > 0) {
 		return false
+	}
+	// The SPEC v1 §6 `alarm` SSE event rides the accepted edge
+	// regardless of whether a NOTIFY can go out.
+	if f := b.onEdge.Load(); f != nil {
+		(*f)(nowMs, targetCount)
 	}
 	sender := b.sender.Load()
 	if sender == nil {

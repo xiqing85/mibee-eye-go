@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/xiqing85/mibee-eye-go/internal/config"
+
 	"github.com/xiqing85/mibee-eye-go/internal/ai"
 	"gopkg.in/yaml.v3"
 )
@@ -266,6 +268,28 @@ func TestActivateModelUnavailableIs409(t *testing.T) {
 	}
 }
 
+// SPEC v1 §6 `alarm`: the event is advertised when GB28181 is enabled
+// (the alarm bridge exists only then).
+func TestCapabilitiesAnnounceAlarmEvent(t *testing.T) {
+	s := New(Config{
+		Port:          8088,
+		Username:      "admin",
+		Password:      "spec-pass-1",
+		OnvifConfig:   &mockOnvifConfig{port: 8080, username: "onvif-user", password: "onvif-pass"},
+		Version:       "test",
+		GB28181Config: &config.GB28181Config{Enabled: true},
+	})
+	cookie, _ := specLogin(t, s)
+	rec := doReq(t, s, http.MethodGet, "/api/capabilities", "", map[string]string{"Cookie": cookie})
+	caps := decode(t, rec)["data"].(map[string]interface{})
+	for _, e := range caps["events"].([]interface{}) {
+		if e == "alarm" {
+			return
+		}
+	}
+	t.Fatal("events must announce alarm with GB28181 enabled")
+}
+
 func TestCapabilitiesAnnounceAIModels(t *testing.T) {
 	s := aiTestServer(t, true)
 	cookie, _ := specLogin(t, s)
@@ -429,8 +453,10 @@ func TestUploadDisabledAnswers501(t *testing.T) {
 	svc := ai.NewService(ai.Options{Enabled: true}, nil, func(ai.Options) (ai.Detector, error) {
 		return &fakeAIDetector{}, nil
 	})
-	s := New(Config{Port: 8088, Username: "admin", Password: "spec-pass-1",
-		ConfigPath: cfgFile, Version: "test", AI: svc})
+	s := New(Config{
+		Port: 8088, Username: "admin", Password: "spec-pass-1",
+		ConfigPath: cfgFile, Version: "test", AI: svc,
+	})
 	cookie, csrf := specLogin(t, s)
 	_, body, ctype := multipartAIUpload(t, "some-model", "yolox", []byte("x"))
 	rec := doMultipartReq(t, s, "POST", "/api/ai/models/some-model", body, cookie, csrf, ctype)
@@ -454,8 +480,10 @@ func TestUploadValidationFailureLeavesNoTrace(t *testing.T) {
 		}
 		return &fakeAIDetector{}, nil
 	})
-	s := New(Config{Port: 8088, Username: "admin", Password: "spec-pass-1",
-		ConfigPath: cfgFile, Version: "test", AI: svc})
+	s := New(Config{
+		Port: 8088, Username: "admin", Password: "spec-pass-1",
+		ConfigPath: cfgFile, Version: "test", AI: svc,
+	})
 	cookie, csrf := specLogin(t, s)
 
 	method, body, ctype := multipartAIUpload(t, "broken-model", "yolox", []byte("junk"))
