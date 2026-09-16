@@ -658,6 +658,15 @@ func main() {
 	shutdownStep("onvif", 5*time.Second, func() error { return onvifServer.Stop() })
 
 	if gbServer != nil {
+		// Graceful deregistration first (REGISTER Expires: 0): the
+		// platform learns the departure now instead of via keepalive
+		// timeout. A lost platform simply times the attempt out — log
+		// and continue to the hard stop.
+		deregCtx, deregCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := gbServer.Deregister(deregCtx); err != nil {
+			slog.Warn("gb28181: deregistration not confirmed", "error", err)
+		}
+		deregCancel()
 		gbServer.Stop()
 		slog.Info("gb28181: stopped")
 	}
