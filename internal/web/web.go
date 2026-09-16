@@ -485,3 +485,10 @@ func coerceFloat64(v interface{}) interface{} {
 // Observe exposes the shared observability state (SPEC §3.2) so the
 // process-wide sampler and log tee can be wired from main.
 func (s *Server) Observe() *Observe { return s.observe }
+
+// BroadcastEvent pushes one SSE event (SPEC v1 §6) to every connected
+// client of the event channel. Hosts use it for events sourced outside
+// the web server (e.g. the GB28181 alarm bridge).
+func (s *Server) BroadcastEvent(event string, payload any) {
+	s.hub.broadcast(event, payload)
+}
