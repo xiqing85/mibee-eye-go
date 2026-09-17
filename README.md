@@ -9,7 +9,7 @@
 <div align="center">
   <table>
     <tr>
-      <td align="center"><b>🪶 15–25 MB</b><br><sub>Memory footprint on RPi 3B</sub></td>
+      <td align="center"><b>🪶 ~74 MB measured</b><br><sub>RPi 3B, AI build, main process (see benchmark)</sub></td>
       <td align="center"><b>✅ ONVIF Profile S</b><br><sub>Device · Media · Imaging</sub></td>
       <td align="center"><b>🔧 Zero CGO</b><br><sub>Pure Go, painless cross-compile</sub></td>
     </tr>
@@ -38,7 +38,7 @@ NVRs — pick by deployment profile:
 
 | Pick the **Go** implementation when… | Pick the **Rust** implementation when… |
 |---|---|
-| You want the quickest path: zero-CGO build, stock cross-compile | The board is memory/flash constrained (~2 MB binary, 6–12 MB RSS) |
+| You want the quickest path: zero-CGO build, stock cross-compile | The board is memory/flash constrained (~2 MB binary; see the measured full-load RSS below) |
 | You want HLS browser playback out of the box | You want the OSD watermark burned into every output |
 | You need the i18n UI or the runtime metrics API | You want capture + encode fully in-process (no capture subprocess) |
 | You prefer hacking on a Go codebase | You prefer hacking on a Rust codebase |
@@ -62,7 +62,7 @@ recording with GB28181 playback · imaging controls · snapshot.
 - **i18n Support** - English/Chinese web UI
 - **Snapshot Support** - JPEG snapshots via HTTP endpoint
 - **Metrics** - Runtime metrics summary over the web API
-- **Low Memory Footprint** - ~15–25 MB RAM usage (+15 MB when the optional AI build is used)
+- **Low Memory Footprint** - ~15–25 MB in lean configs; ~74 MB measured on RPi 3B with the AI build (main process — the rpicam-vid/ffmpeg capture subprocesses are extra)
 - **Cross-Platform Build** - Compile from x86 workstation to aarch64 RPi
 
 ```bash
@@ -260,10 +260,15 @@ discover and pull from.
 | GB28181 device | ✅ | ❌ |
 | Camera imaging controls | ✅ Brightness/contrast/WB/… | ❌ |
 | RTMP push | ✅ built-in | ⚠️ possible, media-server style |
-| Memory (RPi 3B, 720p@15fps) | ~15–25 MB | ~45 MB (indicative) |
+| Memory (RPi 3B, 720p@15fps) | **~74 MB measured** (AI build, main process) | **~93 MB measured** (full feature set) |
 
-Indicative numbers from our RPi 3B deployments — reproduce on your own board
-with [`bench/rpi-bench.sh`](bench/rpi-bench.sh).
+Measured 2026-09-17 with [`bench/rpi-bench.sh`](bench/rpi-bench.sh): Go on
+`rpi3b-cam` (RPi 3B, IMX219 1280×720@15, AI build, `rpicamvid` capture,
+GB28181 registered, one RTSP/TCP client, 60 s): RSS 71–79 MB (avg 74), CPU
+179–278% — main process only, the rpicam-vid/ffmpeg capture subprocesses are
+extra; lean non-AI configs sit far lower. Rust sibling on `rpi3b-storage`
+(RPi 3B, OV5647, full feature set, in-process pipeline): RSS ~93 MB, CPU
+~1.4 cores — see its README for details. Reproduce on your own board.
 
 ### Technology Stack
 

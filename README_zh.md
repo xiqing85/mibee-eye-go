@@ -9,7 +9,7 @@
 <div align="center">
   <table>
     <tr>
-      <td align="center"><b>🪶 15–25 MB</b><br><sub>树莓派 3B 实测内存占用</sub></td>
+      <td align="center"><b>🪶 实测 ~74 MB</b><br><sub>RPi 3B、AI 构建、主进程（见性能表）</sub></td>
       <td align="center"><b>✅ ONVIF Profile S</b><br><sub>设备 · 媒体 · 成像</sub></td>
       <td align="center"><b>🔧 零 CGO</b><br><sub>纯 Go，交叉编译无痛</sub></td>
     </tr>
@@ -35,7 +35,7 @@ SPEC v1 Web UI/API、对接同样的 NVR —— 按部署画像选择：
 
 | 选 **Go 实现**，当你… | 选 **Rust 实现**，当你… |
 |---|---|
-| 想最快跑起来：零 CGO 构建、原生交叉编译 | 板子内存/闪存吃紧（~2 MB 二进制、6–12 MB 内存） |
+| 想最快跑起来：零 CGO 构建、原生交叉编译 | 板子内存/闪存吃紧（~2 MB 二进制；满配 RSS 见下方实测行） |
 | 需要开箱即用的 HLS 浏览器播放 | 需要把 OSD 水印烧录进每一路输出 |
 | 需要 i18n 界面或运行指标 API | 要求采集+编码全程进程内（无采集子进程） |
 | 更想在 Go 代码上动手 | 更想在 Rust 代码上动手 |
@@ -59,7 +59,7 @@ SPEC v1 Web UI/API、对接同样的 NVR —— 按部署画像选择：
 - **国际化支持** - 中英文界面切换 (i18n)
 - **快照支持** - 通过 HTTP 端点获取 JPEG 快照
 - **运行指标** - 经 Web API 输出运行时指标摘要
-- **低内存占用** - 约 15–25 MB RAM（启用可选 AI 构建时另加 15 MB）
+- **低内存占用** - 精简配置约 15–25 MB；RPi 3B + AI 构建实测主进程 ~74 MB（rpicam-vid/ffmpeg 采集子进程的开销另计）
 - **跨平台构建** - 从 x86 工作站交叉编译到 aarch64 树莓派
 
 ## 快速开始
@@ -257,10 +257,15 @@ ONVIF/GB28181 设备。
 | GB28181 设备端 | ✅ | ❌ |
 | 相机图像调节 | ✅ 亮度/对比度/白平衡等 | ❌ |
 | RTMP 推流 | ✅ 内置 | ⚠️ 可实现，媒体服务器风格 |
-| 内存（RPi 3B，720p@15fps） | ~15–25 MB | ~45 MB（参考值） |
+| 内存（RPi 3B，720p@15fps） | **实测 ~74 MB**（AI 构建，主进程） | **实测 ~93 MB**（满配） |
 
-来自我们 RPi 3B 部署的参考值 —— 可用
-[`bench/rpi-bench.sh`](bench/rpi-bench.sh) 在自己的板子上复测。
+2026-09-17 用 [`bench/rpi-bench.sh`](bench/rpi-bench.sh) 实测：Go 侧于
+`rpi3b-cam`（RPi 3B、IMX219 1280×720@15、AI 构建、`rpicamvid` 采集、
+GB28181 已注册、1 路 RTSP/TCP 拉流、60 秒）：RSS 71–79 MB（均值 74）、
+CPU 179–278% —— 仅主进程，rpicam-vid/ffmpeg 采集子进程开销另计；精简
+非 AI 配置要低得多。Rust 兄弟实现于 `rpi3b-storage`（RPi 3B、OV5647、
+满配、进程内管线）：RSS ~93 MB、CPU ~1.4 核——详见其 README。可在自己
+的板子上复测。
 
 ### 技术栈
 
