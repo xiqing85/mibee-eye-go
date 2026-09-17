@@ -19,6 +19,7 @@ import (
 	"github.com/xiqing85/mibee-eye-go/internal/config"
 	"github.com/xiqing85/mibee-eye-go/internal/gb35114auth"
 	"github.com/xiqing85/mibee-eye-go/internal/gbalarm"
+	"github.com/xiqing85/mibee-eye-go/internal/gbdate"
 	"github.com/xiqing85/mibee-eye-go/internal/gbposition"
 	"github.com/xiqing85/mibee-eye-go/internal/h264"
 	"github.com/xiqing85/mibee-eye-go/internal/hls"
@@ -618,6 +619,10 @@ func main() {
 				slog.Error("gb28181 server", "error", err)
 			}
 		}()
+		// SIP-Date drift observation (§9.10.2): poll the platform clock
+		// from the REGISTER responses — observation only, the system
+		// clock is never adjusted (disciplining stays a host/NTP call).
+		go observePlatformDate(ctx, gbServer)
 		slog.Info("gb28181: starting", "port", cfg.GB28181.LocalSIPPort)
 	}
 
@@ -706,6 +711,37 @@ func main() {
 	shutdownStep("camera", 5*time.Second, func() error { return cam.Stop() })
 
 	slog.Info("MiBee Eye stopped", "version", version)
+}
+
+// observePlatformDate polls the platform clock carried by the REGISTER
+// response's SIP Date header (GB/T 28181-2022 §9.10.2) and warns on
+// drift per the gbdate three-state latch. Pure observation — the clock
+// is never adjusted here.
+func observePlatformDate(ctx context.Context, gb *gbdev.Server) {
+	ticker := time.NewTicker(gbdate.ObserveInterval)
+	defer ticker.Stop()
+	var last gbdate.LastWarned
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		platform := gb.PlatformDateUnix()
+		if platform == 0 {
+			continue // no REGISTER response seen yet
+		}
+		outcome, drift, newLast := gbdate.Evaluate(platform, time.Now().Unix(), last)
+		switch outcome {
+		case gbdate.Warn:
+			slog.Warn("gb28181: platform clock drifts from local (SIP Date, §9.10.2); observation only — the system clock is not adjusted",
+				"drift_secs", drift, "threshold_secs", gbdate.WarnDriftSecs)
+		case gbdate.Recovered:
+			slog.Info("gb28181: platform clock drift back within threshold")
+		case gbdate.Stable:
+		}
+		last = newLast
+	}
 }
 
 // shutdownStep runs a shutdown function with a timeout.
