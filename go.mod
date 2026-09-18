@@ -2,6 +2,8 @@ module github.com/xiqing85/mibee-eye-go
 
 go 1.26.0
 
+toolchain go1.26.6
+
 require (
 	github.com/bluenviron/gortsplib/v5 v5.5.3
 	github.com/bluenviron/mediacommon/v2 v2.8.3
