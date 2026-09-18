@@ -26,6 +26,8 @@ github.com/mgutz/ansi v0.0.0-20170206155736-9520e82c474b h1:j7+1HpAFS1zy5+Q4qx1f
 github.com/mgutz/ansi v0.0.0-20170206155736-9520e82c474b/go.mod h1:01TrycV0kFyexm33Z7vhZRXopbI8J3TDReVlkTgMUxE=
 github.com/mickeyzzc/gb28181-go v0.10.1-0.20260916024756-2242b144b8fd h1:Rbcn6Iq9bzNH1X15SaEz/SoAyiKvcUF2DfZCmuJzPBI=
 github.com/mickeyzzc/gb28181-go v0.10.1-0.20260916024756-2242b144b8fd/go.mod h1:nfoCIOHiVAlgx7oUOGRF5YjX0Zv/3Rkwb4vC4y6BM+I=
+github.com/mickeyzzc/gb28181-go v0.10.1-0.20260917114728-73177f3d7197 h1:AyNtDDaENtt8Vj+AFaCT0NfQGmzfJE04obJ4+S/rToo=
+github.com/mickeyzzc/gb28181-go v0.10.1-0.20260917114728-73177f3d7197/go.mod h1:nfoCIOHiVAlgx7oUOGRF5YjX0Zv/3Rkwb4vC4y6BM+I=
 github.com/mickeyzzc/onvif-go/v2 v2.0.0-rc6 h1:AGDsmgSntxh1h/zAIJ4QcvhpFQUZF+P9yP32Rj9gKu8=
 github.com/mickeyzzc/onvif-go/v2 v2.0.0-rc6/go.mod h1:OmXWljqR4RIKMVVly/CxunWdyRCa4onMMGkt84SaQGQ=
 github.com/pion/logging v0.2.4 h1:tTew+7cmQ+Mc1pTBLKH2puKsOvhm32dROumOZ655zB8=
