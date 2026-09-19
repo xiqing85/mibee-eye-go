@@ -30,6 +30,8 @@ github.com/mickeyzzc/gb28181-go v0.10.1-0.20260917114728-73177f3d7197 h1:AyNtDDa
 github.com/mickeyzzc/gb28181-go v0.10.1-0.20260917114728-73177f3d7197/go.mod h1:nfoCIOHiVAlgx7oUOGRF5YjX0Zv/3Rkwb4vC4y6BM+I=
 github.com/mickeyzzc/onvif-go/v2 v2.0.0-rc6 h1:AGDsmgSntxh1h/zAIJ4QcvhpFQUZF+P9yP32Rj9gKu8=
 github.com/mickeyzzc/onvif-go/v2 v2.0.0-rc6/go.mod h1:OmXWljqR4RIKMVVly/CxunWdyRCa4onMMGkt84SaQGQ=
+github.com/mickeyzzc/onvif-go/v2 v2.0.1-0.20260919124532-08a93768d856 h1:spkrnxqjjACOyTK0RpZ8rnnCyt5jGAI5raAQ3Xktddc=
+github.com/mickeyzzc/onvif-go/v2 v2.0.1-0.20260919124532-08a93768d856/go.mod h1:Ev+Uh2j6Ii6pJ5JrHm50wv4ZburLr97GZwTYovj0YsU=
 github.com/pion/logging v0.2.4 h1:tTew+7cmQ+Mc1pTBLKH2puKsOvhm32dROumOZ655zB8=
 github.com/pion/logging v0.2.4/go.mod h1:DffhXTKYdNZU+KtJ5pyQDjvOAh/GsNSyv1lbkFbe3so=
 github.com/pion/randutil v0.1.0 h1:CFG1UdESneORglEsnimhUjf33Rwjubwj6xfiOXBa3mA=
