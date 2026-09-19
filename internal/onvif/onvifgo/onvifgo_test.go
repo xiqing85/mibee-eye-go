@@ -161,7 +161,7 @@ func TestGetStreamUriContract(t *testing.T) {
 		t.Errorf("response missing MediaUri element:\n%s", body)
 	}
 
-	m := regexp.MustCompile(`<(?:[A-Za-z0-9]+:)?Uri>([^<]+)</(?:[A-Za-z0-9]+:)?Uri>`).FindStringSubmatch(body)
+	m := regexp.MustCompile(`<(?:[A-Za-z0-9]+:)?Uri(?:\s[^>]*)?>([^<]+)</(?:[A-Za-z0-9]+:)?Uri>`).FindStringSubmatch(body)
 	if m == nil {
 		t.Fatalf("no Uri element in response:\n%s", body)
 	}
@@ -291,7 +291,7 @@ func TestGetSnapshotUriContract(t *testing.T) {
 	}
 
 	want := fmt.Sprintf("http://%s:%d/snapshot", testAdvertiseIP, testONVIFPort)
-	m := regexp.MustCompile(`<(?:[A-Za-z0-9]+:)?Uri>([^<]+)</(?:[A-Za-z0-9]+:)?Uri>`).FindStringSubmatch(body)
+	m := regexp.MustCompile(`<(?:[A-Za-z0-9]+:)?Uri(?:\s[^>]*)?>([^<]+)</(?:[A-Za-z0-9]+:)?Uri>`).FindStringSubmatch(body)
 	if m == nil {
 		t.Fatalf("no Uri element in response:\n%s", body)
 	}
