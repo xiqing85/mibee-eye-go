@@ -104,10 +104,11 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 	if aiModels {
 		events = append(events, "ai_model_changed")
 	}
-	// SPEC v1 §6 `alarm`: the AI→GB28181 alarm bridge's rising edges
-	// also reach the SSE hub (advertised with GB28181 enabled — the
-	// bridge exists only then; the event additionally requires AI on).
-	if s.cfg.GB28181Config != nil && s.cfg.GB28181Config.Enabled {
+	// SPEC v1 §6 `alarm`: the AI alarm bridge's accepted rising edges
+	// reach the SSE hub (and the ONVIF/GB alarm channels). Advertised
+	// with AI on — GB28181 and ONVIF are delivery channels, not
+	// prerequisites.
+	if s.cfg.AI != nil && s.cfg.AI.Active() {
 		events = append(events, "alarm")
 	}
 	caps := map[string]interface{}{

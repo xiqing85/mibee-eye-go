@@ -347,11 +347,13 @@ func main() {
 		VideoW:              uint32(cfg.Camera.Width),
 		VideoH:              uint32(cfg.Camera.Height),
 	}, auHub, ai.NewDetector)
-	// AI → GB alarm NOTIFY bridge (§9.5): exists only when both AI and
-	// GB28181 run; the sender is attached once the GB server exists
-	// (Step 6.5). No platform subscription → no-ops.
+	// AI → alarm fan-out bridge (GB NOTIFY §9.5 + SPEC §6 SSE alarm +
+	// ONVIF MotionAlarm): exists whenever AI runs; the GB sender is
+	// attached once the GB server exists (Step 6.5) and the ONVIF sink
+	// once the ONVIF server exists (Step 5). Each channel no-ops until
+	// its consumer is up/subscribed.
 	var alarmBridge *gbalarm.Bridge
-	if aiService != nil && cfg.GB28181.Enabled {
+	if aiService != nil {
 		alarmBridge = gbalarm.New(cfg.GB28181.AlarmNotifyEnabled,
 			time.Duration(cfg.GB28181.AlarmCooldownSecs)*time.Second)
 		events := aiService.Events()
@@ -398,6 +400,13 @@ func main() {
 	if err != nil {
 		slog.Error("onvif server init", "error", err)
 		os.Exit(1)
+	}
+	// ONVIF MotionAlarm rides the alarm bridge's accepted rising edges
+	// (events disabled / no NVR subscription → no-ops inside).
+	if alarmBridge != nil {
+		alarmBridge.SetOnvifSink(func(_ int64, targets int) {
+			onvifServer.PublishMotionAlarm(targets)
+		})
 	}
 
 	var webServer *web.Server

@@ -154,6 +154,40 @@ func TestMirrorModeToFlips(t *testing.T) {
 
 // The SPEC v1 §6 `alarm` SSE sink fires on every accepted rising edge —
 // including when no notifier is attached (platform delivery separate).
+func TestAcceptedEdgeFiresOnvifSink(t *testing.T) {
+	b := New(true, 30*time.Second)
+	type edge struct {
+		ms      int64
+		targets int
+	}
+	var got []edge
+	b.SetOnvifSink(func(nowMs int64, targets int) { got = append(got, edge{nowMs, targets}) })
+	if b.OnDetections(5_000, 4) {
+		t.Fatal("no sender attached — NOTIFY must not go out")
+	}
+	if len(got) != 1 || got[0] != (edge{5_000, 4}) {
+		t.Fatalf("onvif sink fired %v, want [{5000 4}]", got)
+	}
+	// Cooldown-suppressed and falling edges must not re-fire.
+	if b.OnDetections(6_000, 5) || b.OnDetections(7_000, 0) || len(got) != 1 {
+		t.Fatalf("cooldown/falling edge must not re-fire sink: %v", got)
+	}
+	// Detaching the sink is supported (config off / server stopped).
+	b.SetOnvifSink(nil)
+	if b.OnDetections(50_000, 1) || len(got) != 1 {
+		t.Fatalf("nil sink must be a safe no-op: %v", got)
+	}
+}
+
+func TestMotionGateBlocksOnvifSink(t *testing.T) {
+	b := New(false, 30*time.Second)
+	fired := 0
+	b.SetOnvifSink(func(int64, int) { fired++ })
+	if b.OnDetections(1_000, 1) || fired != 0 {
+		t.Fatal("gate off at boot must block the onvif sink too")
+	}
+}
+
 func TestAcceptedEdgeFiresEventSink(t *testing.T) {
 	b := New(true, 30*time.Second)
 	var got []int

@@ -96,6 +96,10 @@ onvif:
   username: "admin"
   password: ""  # REQUIRED: set your ONVIF password
 
+  # Expose the Pull-Point events service: AI motion alarms publish as
+  # tns1:VideoSource/MotionAlarm while an NVR holds a subscription
+  events_enabled: true
+
 # ONVIF device information (exposed via GetDeviceInformation)
 device:
   # Friendly camera name

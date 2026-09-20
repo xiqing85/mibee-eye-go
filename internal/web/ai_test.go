@@ -268,26 +268,37 @@ func TestActivateModelUnavailableIs409(t *testing.T) {
 	}
 }
 
-// SPEC v1 §6 `alarm`: the event is advertised when GB28181 is enabled
-// (the alarm bridge exists only then).
+// SPEC v1 §6 `alarm`: the event follows the AI switch — the bridge
+// fans out to the SSE hub, the GB NOTIFY and the ONVIF MotionAlarm, so
+// neither protocol is a prerequisite.
 func TestCapabilitiesAnnounceAlarmEvent(t *testing.T) {
-	s := New(Config{
-		Port:          8088,
-		Username:      "admin",
-		Password:      "spec-pass-1",
-		OnvifConfig:   &mockOnvifConfig{port: 8080, username: "onvif-user", password: "onvif-pass"},
-		Version:       "test",
-		GB28181Config: &config.GB28181Config{Enabled: true},
-	})
+	// AI on (no GB28181 configured at all) announces the alarm event.
+	s := aiTestServer(t, true)
 	cookie, _ := specLogin(t, s)
 	rec := doReq(t, s, http.MethodGet, "/api/capabilities", "", map[string]string{"Cookie": cookie})
 	caps := decode(t, rec)["data"].(map[string]interface{})
 	for _, e := range caps["events"].([]interface{}) {
 		if e == "alarm" {
+			// AI off must NOT announce it even with GB28181 enabled.
+			s2 := New(Config{
+				Port:          8088,
+				Username:      "admin",
+				Password:      "spec-pass-1",
+				OnvifConfig:   &mockOnvifConfig{port: 8080, username: "onvif-user", password: "onvif-pass"},
+				Version:       "test",
+				GB28181Config: &config.GB28181Config{Enabled: true},
+			})
+			cookie2, _ := specLogin(t, s2)
+			rec2 := doReq(t, s2, http.MethodGet, "/api/capabilities", "", map[string]string{"Cookie": cookie2})
+			for _, e2 := range decode(t, rec2)["data"].(map[string]interface{})["events"].([]interface{}) {
+				if e2 == "alarm" {
+					t.Fatal("alarm must not be announced with AI off")
+				}
+			}
 			return
 		}
 	}
-	t.Fatal("events must announce alarm with GB28181 enabled")
+	t.Fatal("events must announce alarm with AI active")
 }
 
 func TestCapabilitiesAnnounceAIModels(t *testing.T) {
