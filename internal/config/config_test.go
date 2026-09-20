@@ -122,8 +122,13 @@ logging: {}
 	if cfg.Device.HardwareID != "OV5647" {
 		t.Errorf("Device.HardwareID = %q, want %q", cfg.Device.HardwareID, "OV5647")
 	}
-	if cfg.Device.SerialNumber != "" {
-		t.Errorf("Device.SerialNumber = %q, want empty", cfg.Device.SerialNumber)
+	// Empty configured serial falls back to the device-level probe
+	// (issue #39): never empty on a probeable host.
+	if cfg.Device.SerialNumber == "" {
+		t.Error("Device.SerialNumber must fall back to the device-level probe, got empty")
+	}
+	if want := DetectDeviceSerial(); cfg.Device.SerialNumber != want {
+		t.Errorf("Device.SerialNumber = %q, want probed %q", cfg.Device.SerialNumber, want)
 	}
 
 	// Logging defaults
@@ -793,5 +798,41 @@ gb28181:
 `
 	if _, err := Load(writeTempYAML(t, cfgYAML)); err != nil {
 		t.Fatalf("Load with gb35114 and no password failed: %v", err)
+	}
+}
+
+// The serial chain (issue #39): explicit config wins; empty falls back
+// to the probeable device identity; the cpuinfo parser is pinned below.
+func TestSerialFromCpuinfo(t *testing.T) {
+	pi := "Hardware\t: BCM2835\nRevision\t: c03114\nSerial\t\t: 10000000a1b2c3d4\nModel\t: Raspberry Pi 4\n"
+	if got := serialFromCpuinfo(pi); got != "10000000a1b2c3d4" {
+		t.Fatalf("cpuinfo serial = %q", got)
+	}
+	if got := serialFromCpuinfo("no serial here\n"); got != "" {
+		t.Fatalf("absent serial must be empty, got %q", got)
+	}
+	if got := serialFromCpuinfo("Serial\t: \n"); got != "" {
+		t.Fatalf("blank serial value must be empty, got %q", got)
+	}
+}
+
+func TestNormalizeMachineID(t *testing.T) {
+	if got := normalizeMachineID("3f2b1c0d9e8a7b6c5d4e3f2a1b0c9d8e\n"); got != "3f2b1c0d9e8a7b6c5d4e3f2a1b0c9d8e" {
+		t.Fatalf("machine id = %q", got)
+	}
+	if got := normalizeMachineID("\n"); got != "" {
+		t.Fatalf("blank machine id must be empty, got %q", got)
+	}
+	if got := normalizeMachineID("short\n"); got != "" {
+		t.Fatalf("too-short machine id must be empty, got %q", got)
+	}
+}
+
+// On this workstation the fallback chain must surface SOMETHING (both
+// machine-id locations exist on every mainstream distro) — the empty
+// serial the NVR事故 started from can no longer happen silently.
+func TestDetectDeviceSerialOnProbeableHost(t *testing.T) {
+	if DetectDeviceSerial() == "" {
+		t.Fatal("expected a probeable device serial (cpuinfo Serial or machine-id) on this host")
 	}
 }
