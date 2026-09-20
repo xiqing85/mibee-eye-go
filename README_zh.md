@@ -100,6 +100,7 @@ Linux 预编译产物（amd64 / arm64 / armv7）见
 - `rtsp.port` - RTSP 流媒体端口（默认 8554）
 - `onvif.port` - ONVIF HTTP/SOAP 端口（默认 8080）
 - `onvif.username/password` - ONVIF 认证凭据
+- `onvif.events_enabled` - Pull-Point 事件服务：AI 运动告警以 MotionAlarm 推送给订阅的 NVR（默认 true）
 - `web.enabled` - 启用 Web 管理界面（默认 true）
 - `web.port` - Web 界面 HTTP 端口（默认 8088）
 - `gb28181.enabled` - 向 SIP 平台注册（默认 false）

@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -79,8 +80,10 @@ func New(cfg *config.Config, advertiseIP string, params *camera.ParamManager, sn
 		ExplicitPrefixes: true,
 		SupportPTZ:       false, // NVR expects PTZ: false
 		SupportImaging:   true,
-		SupportEvents:    false,
-		Profiles:         []onvifserver.ProfileConfig{profileFromConfig(cfg)},
+		// Pull-Point events service (AI MotionAlarm; key gates the
+		// GetCapabilities XAddr advertisement too).
+		SupportEvents: cfg.ONVIF.EventsEnabled,
+		Profiles:      []onvifserver.ProfileConfig{profileFromConfig(cfg)},
 		// GetScopes answers these (#37). Superset of the discovery scopes:
 		// ProbeMatches carries only name+hardware (byte-stable for the NVR),
 		// GetScopes additionally advertises the encoder type.
@@ -116,6 +119,22 @@ func New(cfg *config.Config, advertiseIP string, params *camera.ParamManager, sn
 	if snapshot.Enabled() {
 		mux.Handle("/snapshot", snapshot)
 	}
+	if cfg.ONVIF.EventsEnabled {
+		// Per-subscription subtree: the SubscriptionReference address
+		// embeds the pull-point id in the path, so PullMessages /
+		// Renew / Unsubscribe need their own (path-bound) handler.
+		// Same auth posture as the shared SOAP handler.
+		sub := onvifsoap.NewHandlerWithOptions(onvifsoap.HandlerOptions{
+			Username:         cfg.ONVIF.Username,
+			Password:         cfg.ONVIF.Password,
+			Auth:             onvifsoap.DefaultAuthPolicy(),
+			ExplicitPrefixes: true,
+		})
+		sub.RegisterContextHandler("PullMessages", s.libServer.HandlePullMessages)
+		sub.RegisterContextHandler("Renew", s.libServer.HandleRenew)
+		sub.RegisterContextHandler("Unsubscribe", s.libServer.HandleUnsubscribe)
+		mux.Handle("/onvif/events_service/sub/", sub)
+	}
 	mux.Handle("/", probeSniffer{soap: s.soap, probe: s.responder})
 
 	s.mux = mux
@@ -147,6 +166,34 @@ func (s *Server) registerActions() {
 	s.soap.RegisterContextHandler("GetImagingSettings", s.libServer.HandleGetImagingSettings)
 	s.soap.RegisterContextHandler("SetImagingSettings", s.libServer.HandleSetImagingSettings)
 	s.soap.RegisterContextHandler("GetOptions", s.libServer.HandleGetOptions)
+
+	// Events service (path-insensitive like every other action); the
+	// per-subscription subtree gets its own handler in New — see the
+	// /onvif/events_service/sub/ mux entry.
+	if s.cfg.ONVIF.EventsEnabled {
+		s.soap.RegisterContextHandler("GetServiceCapabilities", s.libServer.HandleGetEventServiceCapabilities)
+		s.soap.RegisterContextHandler("GetEventProperties", s.libServer.HandleGetEventProperties)
+		s.soap.RegisterContextHandler("CreatePullPointSubscription", s.libServer.HandleCreatePullPointSubscription)
+	}
+}
+
+// PublishMotionAlarm fans one accepted AI rising edge into the ONVIF
+// events service (topic tns1:VideoSource/MotionAlarm). No subscriber —
+// events disabled, or nobody pulled a SubscriptionReference yet — is a
+// safe no-op. The shape mirrors the rs/notebook twins: Source is the
+// SPEC single-camera id, State=true marks the rise, Targets carries
+// the detection count.
+func (s *Server) PublishMotionAlarm(targets int) {
+	s.libServer.PublishEvent(onvifserver.Event{
+		Topic: "tns1:VideoSource/MotionAlarm",
+		Source: []onvifserver.SimpleItem{
+			{Name: "Source", Value: "0"},
+		},
+		Data: []onvifserver.SimpleItem{
+			{Name: "State", Value: "true"},
+			{Name: "Targets", Value: strconv.Itoa(targets)},
+		},
+	})
 }
 
 // newResponder builds the WS-Discovery responder. XAddrs are pinned to the

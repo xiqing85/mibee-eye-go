@@ -11,6 +11,19 @@ Notable changes to MiBee Eye (Go implementation) are documented here.
 > GB/T 28181-2022 device-role coverage — see
 > [docs/roadmap-v0.3.0.md](docs/roadmap-v0.3.0.md)).
 
+## [Unreleased]
+
+- **ONVIF Pull-Point events service** (onvif-go v2.2): AI motion alarms
+  now also publish as `tns1:VideoSource/MotionAlarm` while an NVR holds
+  a pull-point subscription — the same accepted rising edge (edge +
+  AlarmReport gate + cooldown) that feeds the GB alarm NOTIFY and the
+  SPEC v1 §6 `alarm` SSE event. New config key `onvif.events_enabled`
+  (default `true`); the per-subscription subtree is served on
+  `/onvif/events_service/sub/` with the same SOAP auth posture, the
+  service actions ride the shared path-insensitive handler. The `alarm`
+  SSE event is now advertised with AI active instead of requiring
+  GB28181 — the alarm bridge exists whenever AI runs.
+
 ## [0.2.0] — 2026-09-13
 
 ### Added

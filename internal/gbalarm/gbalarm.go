@@ -1,5 +1,7 @@
-// Package gbalarm bridges AI detections into GB/T 28181 alarm NOTIFYs
-// (§9.5 / A.2.5) while a platform holds an Alarm subscription.
+// Package gbalarm bridges AI detections into alarm fan-out: the GB/T
+// 28181 alarm NOTIFY (§9.5 / A.2.5), the SPEC v1 §6 `alarm` SSE event,
+// and the ONVIF Pull-Point MotionAlarm event — one accepted rising
+// edge, three sinks.
 //
 // Per the 2022 standard's value tables an analytics alarm is
 // AlarmMethod=5 (视频报警) with AlarmType=2 (运动目标检测报警); priority
@@ -41,6 +43,10 @@ type Bridge struct {
 	// onEdge is the optional rising-edge listener (epoch-ms, target
 	// count) for the web SSE alarm event.
 	onEdge atomic.Pointer[func(nowMs int64, targets int)]
+	// onOnvifEdge is the optional rising-edge listener feeding the
+	// ONVIF events service (epoch-ms, target count) — same accepted
+	// edge again, independent of both the SSE hub and NOTIFY delivery.
+	onOnvifEdge atomic.Pointer[func(nowMs int64, targets int)]
 }
 
 // New builds the bridge; enabled is the boot default of the
@@ -57,6 +63,17 @@ func New(enabled bool, cooldown time.Duration) *Bridge {
 // platform delivery.
 func (b *Bridge) SetEventSink(f func(nowMs int64, targets int)) {
 	b.onEdge.Store(&f)
+}
+
+// SetOnvifSink installs (or with nil detaches) the ONVIF events
+// listener (main.go wraps the onvif-go server's PublishEvent with the
+// MotionAlarm shape).
+func (b *Bridge) SetOnvifSink(f func(nowMs int64, targets int)) {
+	if f == nil {
+		b.onOnvifEdge.Store(nil)
+		return
+	}
+	b.onOnvifEdge.Store(&f)
 }
 
 // SetSender installs the live notifier (the GB28181 server owns it).
@@ -85,6 +102,10 @@ func (b *Bridge) OnDetections(nowMs int64, targetCount int) bool {
 	// The SPEC v1 §6 `alarm` SSE event rides the accepted edge
 	// regardless of whether a NOTIFY can go out.
 	if f := b.onEdge.Load(); f != nil {
+		(*f)(nowMs, targetCount)
+	}
+	// So does the ONVIF MotionAlarm (no NVR subscribed = no-op).
+	if f := b.onOnvifEdge.Load(); f != nil {
 		(*f)(nowMs, targetCount)
 	}
 	sender := b.sender.Load()

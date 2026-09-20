@@ -101,6 +101,7 @@ See `configs/config.example.yaml` for all configuration options. Key settings in
 - `rtsp.port` - RTSP streaming port (8554 default)
 - `onvif.port` - ONVIF HTTP/SOAP port (8080 default)
 - `onvif.username/password` - ONVIF authentication credentials
+- `onvif.events_enabled` - Pull-Point events service: AI motion alarms as MotionAlarm for NVR subscribers (default: true)
 - `web.enabled` - Enable Web admin UI (default: true)
 - `web.port` - Web UI HTTP port (8088 default)
 - `gb28181.enabled` - Register with a SIP platform (default: false)
