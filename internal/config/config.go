@@ -328,6 +328,55 @@ func DefaultConfig() *Config {
 // Load reads a YAML configuration file at path and returns a Config.
 // Values from the file are merged over DefaultConfig().
 // Environment variables with the MIBEE_EYE_ prefix override both.
+// serialFromCpuinfo extracts the Raspberry Pi `Serial` line (16 hex,
+// unique per board) from /proc/cpuinfo contents. Interface-independent
+// and reboot-stable — the identity NVR dedup keys need.
+func serialFromCpuinfo(data string) string {
+	for _, line := range strings.Split(data, "\n") {
+		fields := strings.SplitN(strings.TrimSpace(line), ":", 2)
+		if len(fields) != 2 || strings.TrimSpace(fields[0]) != "Serial" {
+			continue
+		}
+		serial := strings.TrimSpace(fields[1])
+		if serial != "" {
+			return serial
+		}
+	}
+	return ""
+}
+
+// normalizeMachineID validates/normalizes a /etc/machine-id read: a
+// non-empty hex-ish token, else "".
+func normalizeMachineID(data string) string {
+	id := strings.TrimSpace(strings.SplitN(data, "\n", 2)[0])
+	if len(id) < 8 {
+		return ""
+	}
+	return id
+}
+
+// DetectDeviceSerial probes a device-level, interface-independent,
+// reboot-stable serial: the Pi's /proc/cpuinfo Serial line first, then
+// the Linux machine-id (both documented locations). Explicitly NOT the
+// MAC — dual-homed boards (wired + WiFi) would flip identity on
+// interface change. "" when nothing probeable (caller warns, keeps the
+// configured value).
+func DetectDeviceSerial() string {
+	if data, err := os.ReadFile("/proc/cpuinfo"); err == nil {
+		if serial := serialFromCpuinfo(string(data)); serial != "" {
+			return serial
+		}
+	}
+	for _, path := range []string{"/etc/machine-id", "/var/lib/dbus/machine-id"} {
+		if data, err := os.ReadFile(path); err == nil {
+			if id := normalizeMachineID(string(data)); id != "" {
+				return id
+			}
+		}
+	}
+	return ""
+}
+
 func Load(path string) (*Config, error) {
 	cfg := DefaultConfig()
 
@@ -341,6 +390,20 @@ func Load(path string) (*Config, error) {
 	}
 
 	applyEnvOverrides(cfg)
+
+	// Device-level serial fallback (NVR dedup keys on it — an empty
+	// serial breaks stable_id backfill and cross-subnet rediscovery):
+	// explicit config / env win; otherwise probe the board (cpuinfo
+	// Serial, machine-id). Detection failure keeps the configured value
+	// with a warning — never fatal.
+	if cfg.Device.SerialNumber == "" {
+		if detected := DetectDeviceSerial(); detected != "" {
+			cfg.Device.SerialNumber = detected
+			slog.Info("device: serial_number auto-detected", "serial", detected)
+		} else {
+			slog.Warn("device: serial_number empty and no device-level serial probeable (no /proc/cpuinfo Serial, no machine-id) — set device.serial_number; NVR dedup may misbehave")
+		}
+	}
 
 	if err := cfg.Validate(); err != nil {
 		return nil, err
