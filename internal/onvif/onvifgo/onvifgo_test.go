@@ -61,6 +61,38 @@ func newTestServer(t *testing.T) *httptest.Server {
 	return ts
 }
 
+// newTestServerWithSrv is newTestServer but also hands back the
+// composed *Server (tests that need the publish seam).
+func newTestServerWithSrv(t *testing.T) (*httptest.Server, *Server) {
+	t.Helper()
+
+	cfg := config.DefaultConfig()
+	cfg.ONVIF.Port = testONVIFPort
+	cfg.ONVIF.Username = "admin"
+	cfg.ONVIF.Password = testPassword
+	cfg.RTSP.Port = testRTSPPort
+	cfg.Camera.Width = 1280
+	cfg.Camera.Height = 720
+	cfg.Camera.FPS = 25
+	cfg.Camera.Bitrate = 2000000
+	cfg.Device.Name = "TestCam"
+	cfg.Device.Manufacturer = "MiBee"
+	cfg.Device.Model = "Eye"
+	cfg.Device.Firmware = "9.9.9"
+	cfg.Device.SerialNumber = "SN-42"
+	cfg.Device.HardwareID = "IMX219"
+
+	pm := camera.NewParamManager(newMockCamera())
+	srv, err := New(cfg, testAdvertiseIP, pm, onvif.NewSnapshotBuffer(true, "rpicam-still", "ffmpeg"))
+	if err != nil {
+		t.Fatalf("onvifgo.New: %v", err)
+	}
+
+	ts := httptest.NewServer(srv.mux)
+	t.Cleanup(ts.Close)
+	return ts, srv
+}
+
 // soapRequest builds a SOAP 1.2 POST body for the given action.
 func soapRequest(action, inner string) string {
 	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
@@ -192,6 +224,7 @@ func TestGetCapabilitiesContract(t *testing.T) {
 		fmt.Sprintf("http://%s:%d/onvif/device_service", testAdvertiseIP, testONVIFPort),
 		fmt.Sprintf("http://%s:%d/onvif/media_service", testAdvertiseIP, testONVIFPort),
 		fmt.Sprintf("http://%s:%d/onvif/imaging_service", testAdvertiseIP, testONVIFPort),
+		fmt.Sprintf("http://%s:%d/onvif/events_service", testAdvertiseIP, testONVIFPort),
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("capabilities missing advertised XAddr %q:\n%s", want, body)
@@ -564,4 +597,85 @@ func (m *mockImagingCamera) GetParam(name string) (interface{}, error) {
 
 func (m *mockImagingCamera) Info() camera.CameraInfo {
 	return camera.CameraInfo{}
+}
+
+// TestEventsPullPointContract walks the full AI MotionAlarm path through
+// the composed server: CreatePullPointSubscription answers on the shared
+// path-insensitive SOAP handler, the SubscriptionReference points at the
+// dedicated /onvif/events_service/sub/ subtree, and a published
+// MotionAlarm comes back on the next PullMessages.
+func TestEventsPullPointContract(t *testing.T) {
+	ts, srv := newTestServerWithSrv(t)
+
+	create := `<?xml version="1.0" encoding="UTF-8"?>
+<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">
+<s:Body>
+<CreatePullPointSubscription xmlns="http://www.onvif.org/ver10/events/wsdl">
+<InitialTerminationTime>PT1M</InitialTerminationTime>
+</CreatePullPointSubscription>
+</s:Body>
+</s:Envelope>`
+
+	// Path-insensitive dispatch: the create action answers on any path,
+	// like every other action the NVR talks to.
+	// Events actions are auth-protected (unlike the discovery-facing
+	// read actions).
+	status, body := postSOAP(t, ts, "/onvif/device_service", withAuth(create, "digest"))
+	if status != http.StatusOK {
+		t.Fatalf("create status = %d, want 200; body: %s", status, body)
+	}
+	address := xmlText(t, body, "Address")
+	if !strings.Contains(address, "/onvif/events_service/sub/") {
+		t.Fatalf("subscription address %q must live on the sub subtree", address)
+	}
+	subPath := address[strings.Index(address, "/onvif/events_service/sub/"):]
+
+	// Publish one accepted AI edge, then pull it.
+	srv.PublishMotionAlarm(3)
+
+	pull := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">
+<s:Body>
+<PullMessages xmlns="http://www.onvif.org/ver10/events/wsdl">
+<Timeout>PT2S</Timeout>
+<MessageLimit>5</MessageLimit>
+</PullMessages>
+</s:Body>
+</s:Envelope>`)
+	status, body = postSOAP(t, ts, subPath, withAuth(pull, "digest"))
+	if status != http.StatusOK {
+		t.Fatalf("pull status = %d, want 200; body: %s", status, body)
+	}
+	for _, want := range []string{"tns1:VideoSource/MotionAlarm", "State", "true", "Targets", "3"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("pull body missing %q:\n%s", want, body)
+		}
+	}
+}
+
+// xmlText extracts the inner text of the first element with the given
+// local name (address extraction from SubscriptionReference).
+func xmlText(t *testing.T, body, local string) string {
+	t.Helper()
+	dec := xml.NewDecoder(strings.NewReader(body))
+	depth := 0
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			t.Fatalf("xml scan: %v", err)
+		}
+		switch el := tok.(type) {
+		case xml.StartElement:
+			depth++
+			if el.Name.Local == local {
+				var text string
+				if err := dec.DecodeElement(&text, &el); err != nil {
+					t.Fatalf("decode %s: %v", local, err)
+				}
+				return text
+			}
+		case xml.EndElement:
+			depth--
+		}
+	}
 }

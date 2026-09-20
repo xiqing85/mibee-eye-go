@@ -59,6 +59,11 @@ type ONVIFConfig struct {
 	Port     int    `yaml:"port"`     // ONVIF HTTP port
 	Username string `yaml:"username"` // ONVIF WS-UsernameToken username
 	Password string `yaml:"password"` // ONVIF WS-UsernameToken password
+	// EventsEnabled exposes the Pull-Point events service: AI motion
+	// alarms publish as tns1:VideoSource/MotionAlarm while an NVR holds
+	// a subscription. Boot default true (yaml zero-value fixed up in
+	// setDefaults).
+	EventsEnabled bool `yaml:"events_enabled"`
 }
 
 // WebConfig holds Web UI server settings.
@@ -243,9 +248,10 @@ func DefaultConfig() *Config {
 			UDPRTCPPort:          8001,
 		},
 		ONVIF: ONVIFConfig{
-			Port:     8080,
-			Username: "admin",
-			Password: "",
+			Port:          8080,
+			Username:      "admin",
+			Password:      "",
+			EventsEnabled: true,
 		},
 		Device: DeviceConfig{
 			Name:         "Pi Camera V1",
