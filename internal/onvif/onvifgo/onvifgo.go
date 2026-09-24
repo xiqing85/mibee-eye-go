@@ -285,6 +285,9 @@ func (s *Server) Stop() error {
 // GetProfiles from the camera configuration. The NVR auto-selects the
 // first profile and expects an H264 VideoEncoderConfiguration.
 func profileFromConfig(cfg *config.Config) onvifserver.ProfileConfig {
+	// Post-rotation stream resolution (SPEC appendix A #19): Profile S
+	// must match the actual (transformed) stream aspect.
+	w, h := cfg.Camera.EffectiveDims()
 	return onvifserver.ProfileConfig{
 		Token: "main",
 		Name:  "main",
@@ -292,22 +295,22 @@ func profileFromConfig(cfg *config.Config) onvifserver.ProfileConfig {
 			Token: "videoSrc0",
 			Name:  "videoSrc0",
 			Resolution: onvifserver.Resolution{
-				Width:  cfg.Camera.Width,
-				Height: cfg.Camera.Height,
+				Width:  w,
+				Height: h,
 			},
 			Framerate: cfg.Camera.FPS,
 			Bounds: onvifserver.Bounds{
 				X:      0,
 				Y:      0,
-				Width:  cfg.Camera.Width,
-				Height: cfg.Camera.Height,
+				Width:  w,
+				Height: h,
 			},
 		},
 		VideoEncoder: onvifserver.VideoEncoderConfig{
 			Encoding: "H264",
 			Resolution: onvifserver.Resolution{
-				Width:  cfg.Camera.Width,
-				Height: cfg.Camera.Height,
+				Width:  w,
+				Height: h,
 			},
 			Quality:   80,
 			Framerate: cfg.Camera.FPS,
@@ -317,8 +320,8 @@ func profileFromConfig(cfg *config.Config) onvifserver.ProfileConfig {
 		Snapshot: onvifserver.SnapshotConfig{
 			Enabled: true,
 			Resolution: onvifserver.Resolution{
-				Width:  cfg.Camera.Width,
-				Height: cfg.Camera.Height,
+				Width:  w,
+				Height: h,
 			},
 		},
 	}

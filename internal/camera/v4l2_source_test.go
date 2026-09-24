@@ -77,6 +77,136 @@ func TestV4L2FailsWhenNoEncoderAvailable(t *testing.T) {
 	}
 }
 
+// ── device-level transform (SPEC appendix A #9/#19) ──────────────────────
+
+// oneShotCapture yields a single prepared frame, then parks.
+type oneShotCapture struct {
+	frame  []byte
+	closed bool
+}
+
+func (c *oneShotCapture) ReadFrame() ([]byte, error) {
+	if c.frame != nil {
+		f := c.frame
+		c.frame = nil
+		return f, nil
+	}
+	time.Sleep(50 * time.Millisecond)
+	return nil, io.EOF
+}
+func (c *oneShotCapture) Close() { c.closed = true }
+
+// captureEncoder records every frame it is asked to encode.
+type captureEncoder struct {
+	name   string
+	frames [][]byte
+}
+
+func (f *captureEncoder) Encode(yuv []byte, pts uint64) error {
+	cp := make([]byte, len(yuv))
+	copy(cp, yuv)
+	f.frames = append(f.frames, cp)
+	return nil
+}
+func (f *captureEncoder) Close() error { return nil }
+func (f *captureEncoder) Name() string { return f.name }
+
+// pumpOneFrame drives the pump over a single prepared YU12 frame and
+// returns what the encoder received.
+func pumpOneFrame(t *testing.T, opts ...V4L2Option) []byte {
+	t.Helper()
+	params := DefaultParams()
+	params.Width, params.Height = 3, 2 // matches frame3x2 plane layout
+	all := append([]V4L2Option{
+		WithV4L2Device("/dev/null"),
+		WithV4L2EncoderDevice("/dev/video11"),
+		WithV4L2Params(params),
+		WithV4L2FFmpegBin(""),
+		WithV4L2Probe(func(string) (v4l2.ProbeResult, error) {
+			return v4l2.ProbeResult{M2MCapable: true}, nil
+		}),
+		WithV4L2Capture(func(string, uint32, uint32) (captureDevice, error) {
+			return &oneShotCapture{frame: frame3x2()}, nil
+		}),
+	}, opts...)
+	var m2mW, m2mH uint32
+	enc := &captureEncoder{name: "capture-enc"}
+	src := NewV4L2Source(append(all, WithV4L2M2M(func(_ string, w, h uint32) (frameEncoder, error) {
+		m2mW, m2mH = w, h
+		return enc, nil
+	}))...)
+	if err := src.Start(context.Background()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer src.Stop()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && len(enc.frames) == 0 {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if len(enc.frames) == 0 {
+		t.Fatal("pump never delivered a frame to the encoder")
+	}
+	t.Logf("m2m opened at %dx%d", m2mW, m2mH)
+	return enc.frames[0]
+}
+
+func TestV4L2PumpBakesRotation90(t *testing.T) {
+	got := pumpOneFrame(t, WithV4L2Rotation(90))
+	want := []byte{4, 1, 5, 2, 6, 3, 7, 8, 9, 10}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("rotated frame = %v want %v", got, want)
+	}
+}
+
+func TestV4L2PumpBakesRuntimeFlip(t *testing.T) {
+	// Flips seeded from params reach the encoder in this backend (raw
+	// pixels are ours) — and runtime SetParam updates them (next test).
+	params := DefaultParams()
+	params.Width, params.Height = 3, 2
+	params.HFlip = true
+	got := pumpOneFrame(t, WithV4L2Params(params))
+	// Y [[1,2,3],[4,5,6]] hflip → [[3,2,1],[6,5,4]]; chroma rows mirrored.
+	want := []byte{3, 2, 1, 6, 5, 4, 8, 7, 10, 9}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("flipped frame = %v want %v", got, want)
+	}
+}
+
+func TestV4L2PumpSetParamFlipTakesEffect(t *testing.T) {
+	params := DefaultParams()
+	params.Width, params.Height = 3, 2
+	enc := &captureEncoder{name: "capture-enc"}
+	src := NewV4L2Source(
+		WithV4L2Device("/dev/null"),
+		WithV4L2EncoderDevice("/dev/video11"),
+		WithV4L2Params(params),
+		WithV4L2FFmpegBin(""),
+		WithV4L2Probe(func(string) (v4l2.ProbeResult, error) {
+			return v4l2.ProbeResult{M2MCapable: true}, nil
+		}),
+		WithV4L2Capture(func(string, uint32, uint32) (captureDevice, error) {
+			return &oneShotCapture{frame: frame3x2()}, nil
+		}),
+		WithV4L2M2M(func(string, uint32, uint32) (frameEncoder, error) {
+			return enc, nil
+		}),
+	)
+	if err := src.Start(context.Background()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer src.Stop()
+	if !src.flipV.Load() {
+		src.SetParam("vFlip", true)
+	}
+	if !src.flipV.Load() {
+		t.Fatal("SetParam(vFlip) must flip the transform atomic")
+	}
+	v, err := src.GetParam("vFlip")
+	if err != nil || v != true {
+		t.Fatalf("GetParam(vFlip) = %v, %v", v, err)
+	}
+}
+
 func TestV4L2ParamsRoundTrip(t *testing.T) {
 	s := NewV4L2Source(WithV4L2Params(DefaultParams()))
 	if err := s.SetParam("brightness", float32(0.5)); err != nil {

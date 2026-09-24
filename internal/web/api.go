@@ -78,7 +78,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	if oc != nil {
 		resp["model"] = oc.DeviceModel()
 		resp["vendor"] = oc.DeviceManufacturer()
-		resp["resolution"] = fmt.Sprintf("%dx%d", oc.CameraWidth(), oc.CameraHeight())
+		resp["resolution"] = fmt.Sprintf("%dx%d", oc.CameraEffectiveWidth(), oc.CameraEffectiveHeight())
 		resp["fps"] = oc.CameraFPS()
 	}
 	if s.cfg.CameraStatus != nil {
@@ -453,7 +453,7 @@ func (s *Server) cameraDoc() map[string]interface{} {
 	}
 	if oc := s.cfg.OnvifConfig; oc != nil {
 		doc["name"] = oc.DeviceName()
-		doc["resolution"] = fmt.Sprintf("%dx%d", oc.CameraWidth(), oc.CameraHeight())
+		doc["resolution"] = fmt.Sprintf("%dx%d", oc.CameraEffectiveWidth(), oc.CameraEffectiveHeight())
 		doc["fps"] = oc.CameraFPS()
 		doc["rtsp_url"] = fmt.Sprintf("rtsp://self:%d/stream", oc.RTSPPort())
 	}

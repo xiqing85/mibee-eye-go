@@ -146,19 +146,28 @@ type configAdapter struct {
 	deviceIP string
 }
 
-func (a *configAdapter) ONVIFUsername() string      { return a.cfg.ONVIF.Username }
-func (a *configAdapter) ONVIFPassword() string      { return a.cfg.ONVIF.Password }
-func (a *configAdapter) ONVIFPort() int             { return a.cfg.ONVIF.Port }
-func (a *configAdapter) RTSPPort() int              { return a.cfg.RTSP.Port }
-func (a *configAdapter) DeviceIP() string           { return a.deviceIP }
-func (a *configAdapter) CameraDevice() string       { return a.cfg.Camera.Device }
-func (a *configAdapter) CameraCodec() string        { return a.cfg.Camera.Codec }
-func (a *configAdapter) CameraBitrate() int         { return a.cfg.Camera.Bitrate }
-func (a *configAdapter) CameraWidth() int           { return a.cfg.Camera.Width }
-func (a *configAdapter) CameraHeight() int          { return a.cfg.Camera.Height }
-func (a *configAdapter) CameraFPS() int             { return a.cfg.Camera.FPS }
-func (a *configAdapter) CameraHFlip() bool          { return a.cfg.Camera.HFlip }
-func (a *configAdapter) CameraVFlip() bool          { return a.cfg.Camera.VFlip }
+func (a *configAdapter) ONVIFUsername() string { return a.cfg.ONVIF.Username }
+func (a *configAdapter) ONVIFPassword() string { return a.cfg.ONVIF.Password }
+func (a *configAdapter) ONVIFPort() int        { return a.cfg.ONVIF.Port }
+func (a *configAdapter) RTSPPort() int         { return a.cfg.RTSP.Port }
+func (a *configAdapter) DeviceIP() string      { return a.deviceIP }
+func (a *configAdapter) CameraDevice() string  { return a.cfg.Camera.Device }
+func (a *configAdapter) CameraCodec() string   { return a.cfg.Camera.Codec }
+func (a *configAdapter) CameraBitrate() int    { return a.cfg.Camera.Bitrate }
+func (a *configAdapter) CameraWidth() int      { return a.cfg.Camera.Width }
+func (a *configAdapter) CameraHeight() int     { return a.cfg.Camera.Height }
+func (a *configAdapter) CameraFPS() int        { return a.cfg.Camera.FPS }
+func (a *configAdapter) CameraHFlip() bool     { return a.cfg.Camera.HFlip }
+func (a *configAdapter) CameraVFlip() bool     { return a.cfg.Camera.VFlip }
+func (a *configAdapter) CameraRotation() int   { return a.cfg.Camera.Rotation }
+func (a *configAdapter) CameraEffectiveWidth() int {
+	w, _ := a.cfg.Camera.EffectiveDims()
+	return w
+}
+func (a *configAdapter) CameraEffectiveHeight() int {
+	_, h := a.cfg.Camera.EffectiveDims()
+	return h
+}
 func (a *configAdapter) DeviceName() string         { return a.cfg.Device.Name }
 func (a *configAdapter) DeviceManufacturer() string { return a.cfg.Device.Manufacturer }
 func (a *configAdapter) DeviceModel() string        { return a.cfg.Device.Model }
@@ -214,6 +223,9 @@ func main() {
 	// GB28181, recordings, /snapshot) sees them, persistently.
 	cameraParams.HFlip = cfg.Camera.HFlip
 	cameraParams.VFlip = cfg.Camera.VFlip
+	// Post-rotation stream resolution (SPEC appendix A #19) — the AI
+	// detection bbox space and every dimension announcement use these.
+	effW, effH := cfg.Camera.EffectiveDims()
 	cameraInfo := camera.CameraInfo{
 		Name:         cfg.Device.Name,
 		Manufacturer: cfg.Device.Manufacturer,
@@ -244,6 +256,8 @@ func main() {
 			camera.WithVidParams(cameraParams),
 			camera.WithVidInfo(cameraInfo),
 			camera.WithVidFrameBufferSize(cfg.Camera.FrameBufferSize),
+			// Baked by rpicam-vid's libcamera transform (SPEC appendix A #19).
+			camera.WithVidRotation(cfg.Camera.Rotation),
 		)
 	case "v4l2":
 		// Generic V4L2 backend (any board): pure-Go MMAP capture from
@@ -257,6 +271,8 @@ func main() {
 			camera.WithV4L2FFmpegBin(cfg.Camera.FFmpegBin),
 			camera.WithV4L2Params(cameraParams),
 			camera.WithV4L2Info(cameraInfo),
+			// Go-side pixel transpose before encoding (SPEC appendix A #19).
+			camera.WithV4L2Rotation(cfg.Camera.Rotation),
 		)
 	default:
 		cam = camera.NewRPiCamera(
@@ -280,6 +296,9 @@ func main() {
 
 	// SnapshotBuffer for /snapshot endpoint
 	snapshotBuffer := onvif.NewSnapshotBuffer(true, cfg.Camera.StillBin, cfg.Camera.FFmpegBin)
+	// Tier-1 rpicam-still snapshots apply the same transform the stream
+	// bakes in (#9/#19) so the JPEG orientation always matches.
+	snapshotBuffer.SetTransform(cfg.Camera.Rotation, cfg.Camera.HFlip, cfg.Camera.VFlip)
 	go snapshotBuffer.SubscribeToHub(ctx, auHub)
 
 	go func() {
@@ -344,8 +363,8 @@ func main() {
 		ConfidenceThreshold: cfg.AI.ConfidenceThreshold,
 		IntervalMs:          cfg.AI.IntervalMs,
 		DecoderBin:          cfg.AI.DecoderBin,
-		VideoW:              uint32(cfg.Camera.Width),
-		VideoH:              uint32(cfg.Camera.Height),
+		VideoW:              uint32(effW),
+		VideoH:              uint32(effH),
 	}, auHub, ai.NewDetector)
 	// AI → alarm fan-out bridge (GB NOTIFY §9.5 + SPEC §6 SSE alarm +
 	// ONVIF MotionAlarm): exists whenever AI runs; the GB sender is

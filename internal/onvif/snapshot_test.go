@@ -107,3 +107,24 @@ func TestSnapshotFallsBackToRawIDRWhenTranscodeFails(t *testing.T) {
 		t.Fatalf("raw fallback should start with the SPS start code, got % 02x", data[:5])
 	}
 }
+
+func TestStillArgsCarryDeviceTransform(t *testing.T) {
+	// SPEC appendix A #9/#19: tier-1 rpicam-still snapshots must apply the
+	// same transform that is baked into the stream, or the JPEG would
+	// mismatch the (transformed) video.
+	sb := NewSnapshotBuffer(true, "rpicam-still", "ffmpeg")
+	if args := sb.stillArgs(); len(args) != 0 {
+		t.Fatalf("no transform set, got %v", args)
+	}
+	sb.SetTransform(90, true, false)
+	want := []string{"--rotation", "90", "--hflip"}
+	got := sb.stillArgs()
+	if len(got) != len(want) {
+		t.Fatalf("args = %v want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("args = %v want %v", got, want)
+		}
+	}
+}
