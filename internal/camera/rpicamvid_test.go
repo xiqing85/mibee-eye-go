@@ -2,11 +2,14 @@ package camera
 
 import (
 	"bytes"
+	"fmt"
+	"io"
 	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/xiqing85/mibee-eye-go/internal/h264"
+	"github.com/xiqing85/mibee-eye-go/internal/v4l2"
 )
 
 // buildAnnexB joins NALUs into an Annex-B bytestream with 4-byte start codes.
@@ -242,18 +245,24 @@ func TestBuildArgsFlips(t *testing.T) {
 }
 
 func TestBuildArgsRotation(t *testing.T) {
-	// Device-level rotation (SPEC appendix A #19) reaches the rpicam-vid
-	// command line for every quarter turn — baked by libcamera transform.
-	for _, rotation := range []int{0, 90, 180, 270} {
+	// Device-level rotation (SPEC appendix A #19). 0/180 bake via the
+	// rpicam-vid H.264 path (libcamera flips → --rotation); 90/270 switch
+	// the subprocess to raw YUV420 (rotation is baked in-process, so no
+	// transform flags reach rpicam-vid — Pi libcamera cannot transpose).
+	for _, rotation := range []int{0, 180} {
 		c := NewRPiCamVidCamera(
 			WithVidBinPath("rpicam-vid"),
 			WithVidParams(DefaultParams()),
 			WithVidInfo(CameraInfo{}),
 			WithVidRotation(rotation),
 		)
+		c.yuvMode = c.rotation == 90 || c.rotation == 270
 		args := c.buildArgs()
-		want := "--rotation " + strconv.Itoa(rotation)
 		joined := " " + strings.Join(args, " ") + " "
+		if !strings.Contains(joined, "--codec h264") {
+			t.Errorf("rotation %d: expected h264 codec, got %v", rotation, args)
+		}
+		want := "--rotation " + strconv.Itoa(rotation)
 		if rotation == 0 {
 			if strings.Contains(joined, "--rotation") {
 				t.Errorf("rotation 0: unexpected --rotation in args: %v", args)
@@ -264,10 +273,187 @@ func TestBuildArgsRotation(t *testing.T) {
 			t.Errorf("rotation %d: expected %q in args, got %v", rotation, want, args)
 		}
 	}
+	for _, rotation := range []int{90, 270} {
+		c := NewRPiCamVidCamera(
+			WithVidBinPath("rpicam-vid"),
+			WithVidParams(DefaultParams()),
+			WithVidInfo(CameraInfo{}),
+			WithVidRotation(rotation),
+		)
+		c.yuvMode = true
+		args := c.buildArgs()
+		joined := " " + strings.Join(args, " ") + " "
+		if !strings.Contains(joined, "--codec yuv420") {
+			t.Errorf("rotation %d: expected yuv420 codec, got %v", rotation, args)
+		}
+		for _, banned := range []string{"--rotation", "--hflip", "--vflip", "--inline", "--intra"} {
+			if strings.Contains(joined, " "+banned+" ") || strings.Contains(joined, " "+banned+"") {
+				t.Errorf("rotation %d yuv mode: %q must not reach rpicam-vid: %v", rotation, banned, args)
+			}
+		}
+	}
 	// Out-of-enum values normalize to 0 (validation rejects upstream).
 	c := NewRPiCamVidCamera(WithVidBinPath("rpicam-vid"), WithVidParams(DefaultParams()),
 		WithVidInfo(CameraInfo{}), WithVidRotation(45))
 	if args := c.buildArgs(); strings.Contains(strings.Join(args, " "), "--rotation") {
 		t.Errorf("rotation 45 should normalize to 0, got %v", args)
+	}
+}
+
+// ── 90°/270° rotation pipeline (raw YUV subprocess + in-process encode) ──
+
+// yuvPipelineCamera builds a camera wired for the 90°/270° rotation
+// pipeline with fake encoder seams, resolving the encoder the way Start
+// would (without spawning a real subprocess — buildArgs/Start paths have
+// their own coverage).
+func yuvPipelineCamera(t *testing.T, rotation int, enc frameEncoder) *RPiCamVidCamera {
+	t.Helper()
+	params := DefaultParams()
+	// Even dims (validation requires them for 90/270); frame4x2 goldens.
+	params.Width, params.Height = 4, 2
+	c := NewRPiCamVidCamera(
+		WithVidBinPath("rpicam-vid"),
+		WithVidParams(params),
+		WithVidInfo(CameraInfo{}),
+		WithVidRotation(rotation),
+		WithVidEncoderDevice("/dev/video11"),
+		WithVidFFmpegBin("ffmpeg"),
+	)
+	c.yuvMode = true
+	c.started = true // bypass Start's subprocess spawn; pieces under test
+	c.framesCh = make(chan Frame, 4)
+	c.probeEncoder = func(string) (v4l2.ProbeResult, error) {
+		return v4l2.ProbeResult{M2MCapable: true}, nil
+	}
+	if enc != nil {
+		c.openM2M = func(string, uint32, uint32) (frameEncoder, error) { return enc, nil }
+	} else {
+		c.openM2M = func(string, uint32, uint32) (frameEncoder, error) {
+			return nil, fmt.Errorf("no m2m in test")
+		}
+	}
+	if err := c.resolveYuvEncoder(); err != nil {
+		t.Fatalf("resolveYuvEncoder: %v", err)
+	}
+	return c
+}
+
+// feedYuvFrame drives readLoopYUV over a fake subprocess stdout carrying
+// exactly one raw I420 frame.
+func feedYuvFrame(c *RPiCamVidCamera) {
+	pr, pw := io.Pipe()
+	c.mu.Lock()
+	c.stdout = pr
+	c.mu.Unlock()
+	go func() {
+		pw.Write(frame4x2())
+		pw.Close()
+	}()
+	c.readLoopYUV()
+}
+
+// frame4x2 builds a 4×2 YU12 frame: Y = 1..8, U = 9..10 (2×1), V = 11..12
+// (2×1) — even dims, the shape the 90/270 pipeline really runs with.
+func frame4x2() []byte {
+	return []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}
+}
+
+func TestYuvPipelineBakesRotation90(t *testing.T) {
+	enc := &captureEncoder{name: "capture-enc"}
+	c := yuvPipelineCamera(t, 90, enc)
+	feedYuvFrame(c)
+	if len(enc.frames) != 1 {
+		t.Fatalf("encoder got %d frames, want 1", len(enc.frames))
+	}
+	// Golden: 90° cw transpose of frame4x2 (same math the yuv_transform
+	// unit tests pin — proving the pipeline wires the transform in).
+	// Y [[1,2,3,4],[5,6,7,8]] --cw--> [[5,1],[6,2],[7,3],[8,4]];
+	// U [9,10] --> [9;10]; V [11,12] --> [11;12].
+	want := []byte{5, 1, 6, 2, 7, 3, 8, 4, 9, 10, 11, 12}
+	if !bytes.Equal(enc.frames[0], want) {
+		t.Fatalf("encoded frame = %v want %v", enc.frames[0], want)
+	}
+}
+
+func TestYuvPipelineSetParamFlipAppliesNextFrame(t *testing.T) {
+	enc := &captureEncoder{name: "capture-enc"}
+	c := yuvPipelineCamera(t, 90, enc)
+	if err := c.SetParam("hFlip", true); err != nil {
+		t.Fatalf("SetParam: %v", err)
+	}
+	if !c.flipH.Load() {
+		t.Fatal("SetParam(hFlip) must flip the transform atomic")
+	}
+	feedYuvFrame(c)
+	// 90° cw then hflip on the rotated axes (2×4 frame): each rotated Y
+	// row mirrors; the rotated chroma planes are 1 sample wide, so the
+	// horizontal mirror is the identity there (geometrically correct).
+	want := []byte{1, 5, 2, 6, 3, 7, 4, 8, 9, 10, 11, 12}
+	if !bytes.Equal(enc.frames[0], want) {
+		t.Fatalf("rotated+flipped frame = %v want %v", enc.frames[0], want)
+	}
+}
+
+func TestYuvPipelineEncoderOpenedWithSwappedDims(t *testing.T) {
+	var gotW, gotH uint32
+	enc := &captureEncoder{name: "capture-enc"}
+	c := NewRPiCamVidCamera(
+		WithVidBinPath("rpicam-vid"),
+		WithVidParams(func() Params { p := DefaultParams(); p.Width, p.Height = 3, 2; return p }()),
+		WithVidInfo(CameraInfo{}),
+		WithVidRotation(90),
+		WithVidEncoderDevice("/dev/video11"),
+		WithVidFFmpegBin(""),
+	)
+	c.yuvMode = true
+	c.framesCh = make(chan Frame, 4)
+	c.probeEncoder = func(string) (v4l2.ProbeResult, error) {
+		return v4l2.ProbeResult{M2MCapable: true}, nil
+	}
+	c.openM2M = func(_ string, w, h uint32) (frameEncoder, error) {
+		gotW, gotH = w, h
+		return enc, nil
+	}
+	if err := c.resolveYuvEncoder(); err != nil {
+		t.Fatalf("resolveYuvEncoder: %v", err)
+	}
+	if gotW != 2 || gotH != 3 {
+		t.Fatalf("encoder opened at %dx%d, want 2x3 (swapped)", gotW, gotH)
+	}
+}
+
+func TestYuvPipelineFailsLoudWithoutEncoder(t *testing.T) {
+	c := NewRPiCamVidCamera(
+		WithVidBinPath("rpicam-vid"),
+		WithVidParams(DefaultParams()),
+		WithVidInfo(CameraInfo{}),
+		WithVidRotation(90),
+		WithVidEncoderDevice("/dev/video11"),
+		WithVidFFmpegBin(""),
+	)
+	c.yuvMode = true
+	c.framesCh = make(chan Frame, 4)
+	c.probeEncoder = func(string) (v4l2.ProbeResult, error) {
+		return v4l2.ProbeResult{}, io.ErrClosedPipe
+	}
+	c.openM2M = func(string, uint32, uint32) (frameEncoder, error) {
+		return nil, io.ErrClosedPipe
+	}
+	if err := c.resolveYuvEncoder(); err == nil {
+		t.Fatal("resolveYuvEncoder must fail loudly when no encoder is available")
+	}
+}
+
+func TestYuvPipelineForceIDR(t *testing.T) {
+	enc := &captureEncoder{name: "capture-enc"}
+	c := yuvPipelineCamera(t, 90, enc)
+	if err := c.ForceIDR(); err != nil {
+		t.Fatalf("yuv pipeline should forward ForceIDR: %v", err)
+	}
+	// H.264 path fails honestly.
+	h264cam := NewRPiCamVidCamera(WithVidBinPath("rpicam-vid"), WithVidParams(DefaultParams()),
+		WithVidInfo(CameraInfo{}), WithVidRotation(0))
+	if err := h264cam.ForceIDR(); err == nil {
+		t.Fatal("h264 path ForceIDR must fail honestly")
 	}
 }

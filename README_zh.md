@@ -97,7 +97,7 @@ Linux 预编译产物（amd64 / arm64 / armv7）见
 - `camera.bitrate` - 视频码率（比特/秒）
 - `camera.idr_period` - 关键帧间隔；同时约束 AI 检测节奏
 - `camera.hflip` / `camera.vflip` - 翻转烧录进流（经统一重启生效）
-- `camera.rotation` - 90° 步进旋转（0/90/180/270，顺时针）烧录进流；90/270 互换对外宣告的分辨率（v4l2 模式进程内转置、全四档；rpicamvid 模式仅 0/180——树莓派 libcamera 无 transpose 支持；其余模式拒绝非 0 值）
+- `camera.rotation` - 90° 步进旋转（0/90/180/270，顺时针）烧录进流；90/270 互换对外宣告的分辨率。rpicamvid：0/180 走 libcamera 翻转、90/270 走裸 YUV 子进程 + 进程内转置 + M2M 硬编（树莓派 libcamera 无 transpose 支持，管线绕开）；v4l2：进程内转置；其余模式拒绝非 0 值
 - `rtsp.port` - RTSP 流媒体端口（默认 8554）
 - `onvif.port` - ONVIF HTTP/SOAP 端口（默认 8080）
 - `onvif.username/password` - ONVIF 认证凭据
