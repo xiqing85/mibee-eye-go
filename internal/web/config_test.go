@@ -13,6 +13,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// multiSectionYAML is a complete, valid config: PUT now validates the
+// merged document before persisting, so the fixture must satisfy
+// Config.Validate() on its own.
 const multiSectionYAML = `camera:
   device: /dev/video0
   mode: rpicamvid
@@ -21,6 +24,13 @@ const multiSectionYAML = `camera:
   fps: 15
   codec: h264
   bitrate: 2000000
+  idr_period: 15
+  frame_buffer_size: 30
+  max_backoff: 30s
+rtsp:
+  port: 8554
+  subscriber_buffer_size: 64
+  write_queue_size: 128
 onvif:
   port: 8080
   username: admin
