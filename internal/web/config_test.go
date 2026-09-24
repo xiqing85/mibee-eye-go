@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -14,6 +15,7 @@ import (
 
 const multiSectionYAML = `camera:
   device: /dev/video0
+  mode: rpicamvid
   width: 1280
   height: 720
   fps: 15
@@ -125,5 +127,45 @@ func TestAtomicWriteLeavesNoTempFiles(t *testing.T) {
 	}
 	if len(entries) != 1 || entries[0].Name() != "config.yaml" {
 		t.Fatalf("temp files left behind: %v", entries)
+	}
+}
+
+// SPEC appendix A #19 + the validate-before-persist contract: PUT must
+// reject an invalid merged config with 400 and leave the file untouched —
+// boot-time validation exits the process, so persisting garbage would
+// brick the service in a systemd restart loop.
+func TestPutConfigInvalidRotationRejected(t *testing.T) {
+	s, path := configServer(t, multiSectionYAML)
+	cookie, csrf := specLogin(t, s)
+
+	rec := doReq(t, s, http.MethodPut, "/api/config",
+		`{"camera":{"rotation":45}}`, authHdr(cookie, csrf))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("PUT invalid rotation: got %d %s, want 400", rec.Code, rec.Body.String())
+	}
+	// File on disk unchanged.
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "rotation") {
+		t.Fatalf("rejected update must not persist, file now: %s", data)
+	}
+	// The service was not asked to restart either (swappable hook).
+}
+
+func TestPutConfigInvalidFpsRejected(t *testing.T) {
+	// Same contract for a pre-existing key: fps must stay positive.
+	s, path := configServer(t, multiSectionYAML)
+	cookie, csrf := specLogin(t, s)
+
+	rec := doReq(t, s, http.MethodPut, "/api/config",
+		`{"camera":{"fps":0}}`, authHdr(cookie, csrf))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("PUT fps 0: got %d %s, want 400", rec.Code, rec.Body.String())
+	}
+	data, _ := os.ReadFile(path)
+	if !strings.Contains(string(data), "fps: 15") {
+		t.Fatalf("original fps must be intact, file: %s", data)
 	}
 }

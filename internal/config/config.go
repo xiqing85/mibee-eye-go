@@ -40,7 +40,7 @@ type CameraConfig struct {
 	MaxBackoff      time.Duration `yaml:"max_backoff"`       // Max subprocess restart backoff
 	HFlip           bool          `yaml:"hflip"`             // Device-level horizontal mirror (baked into the encoded stream)
 	VFlip           bool          `yaml:"vflip"`             // Device-level vertical flip (upside-down mount compensation)
-	Rotation        int           `yaml:"rotation"`          // Device-level rotation, clockwise degrees 0|90|180|270 (SPEC appendix A #19; baked into the stream; rpicamvid/v4l2 modes only)
+	Rotation        int           `yaml:"rotation"`          // Device-level rotation, clockwise degrees 0|90|180|270 (SPEC appendix A #19; baked into the stream; v4l2 full range, rpicamvid 0|180 only — Pi libcamera has no transpose)
 }
 
 // EffectiveDims returns the stream resolution after camera.rotation is
@@ -580,7 +580,16 @@ func (c *Config) Validate() error {
 	}
 	if c.Camera.Rotation != 0 {
 		switch c.Camera.Mode {
-		case "rpicamvid", "v4l2":
+		case "v4l2":
+			// Full quarter turns: the frames are transposed in-process.
+		case "rpicamvid":
+			// Raspberry Pi libcamera (vc4/PiSP) rejects transpose
+			// transforms — "transforms requiring transpose not
+			// supported" — so rpicam-vid only bakes 0/180 (flip-based).
+			// Verified live on a Pi 3B / IMX219 / libcamera 0.7.1.
+			if c.Camera.Rotation == 90 || c.Camera.Rotation == 270 {
+				return fmt.Errorf("config.camera.rotation: rpicamvid mode supports only 0 or 180 (Raspberry Pi libcamera has no transpose support); use mode v4l2 for 90/270")
+			}
 		default:
 			return fmt.Errorf("config.camera.rotation: only supported in rpicamvid and v4l2 modes (mode %q has no raw-pixel or libcamera-transform path)",
 				c.Camera.Mode)
