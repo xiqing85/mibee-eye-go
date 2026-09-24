@@ -38,6 +38,10 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 		// endpoints (SPEC §4.5) are their API surface.
 		"hflip": oc.CameraHFlip(),
 		"vflip": oc.CameraVFlip(),
+		// Device-level rotation (SPEC appendix A #19) — same persisted
+		// YAML key; must be overlaid or the settings editor never shows
+		// it on a device whose YAML never carried the key.
+		"rotation": oc.CameraRotation(),
 	}
 
 	webUser, webPass := s.currentCredentials()
