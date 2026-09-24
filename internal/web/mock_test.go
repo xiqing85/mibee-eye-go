@@ -18,6 +18,9 @@ func (m *mockOnvifConfig) CameraCodec() string        { return "h264" }
 func (m *mockOnvifConfig) CameraBitrate() int         { return 2000000 }
 func (m *mockOnvifConfig) CameraWidth() int           { return 1280 }
 func (m *mockOnvifConfig) CameraHeight() int          { return 720 }
+func (m *mockOnvifConfig) CameraRotation() int        { return 0 }
+func (m *mockOnvifConfig) CameraEffectiveWidth() int  { return 1280 }
+func (m *mockOnvifConfig) CameraEffectiveHeight() int { return 720 }
 func (m *mockOnvifConfig) CameraFPS() int             { return 15 }
 func (m *mockOnvifConfig) CameraHFlip() bool          { return false }
 func (m *mockOnvifConfig) CameraVFlip() bool          { return false }

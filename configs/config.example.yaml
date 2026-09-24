@@ -34,6 +34,10 @@ camera:
 
   # Video codec (h264, h265)
   codec: h264
+  # Device-level rotation baked into the stream (SPEC appendix A #19):
+  # 0 | 90 | 180 | 270 (degrees clockwise); 90/270 swap the effective
+  # stream resolution. Supported in rpicamvid and v4l2 modes only.
+  rotation: 0
 
   # Target bitrate in bits per second (2 Mbps)
   bitrate: 2000000

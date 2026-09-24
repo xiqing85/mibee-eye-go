@@ -21,6 +21,13 @@ type ConfigProvider interface {
 	CameraFPS() int
 	CameraHFlip() bool
 	CameraVFlip() bool
+	CameraRotation() int
+	// CameraEffectiveWidth/Height expose the post-rotation stream
+	// resolution (SPEC appendix A #19): 90/270 swap the axes. Announcement
+	// sites (status, camera doc, MSE, ONVIF) must use these; the raw
+	// CameraWidth/Height stay what the config file stores.
+	CameraEffectiveWidth() int
+	CameraEffectiveHeight() int
 	DeviceName() string
 	DeviceManufacturer() string
 	DeviceModel() string

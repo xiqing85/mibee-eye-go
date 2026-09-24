@@ -69,10 +69,12 @@ func WithVidBinPath(path string) RPiCamVidOption {
 	}
 }
 
-// WithVidRotation sets the sensor rotation in degrees (0 or 180).
+// WithVidRotation sets the device-level rotation in degrees clockwise
+// (0|90|180|270, SPEC appendix A #19), baked into the encoded stream by
+// rpicam-vid's libcamera transform. Applied at subprocess (re)start.
 func WithVidRotation(rotation int) RPiCamVidOption {
 	return func(c *RPiCamVidCamera) {
-		c.rotation = rotation
+		c.rotation = NormalizeRotation(rotation)
 	}
 }
 
@@ -272,8 +274,8 @@ func (c *RPiCamVidCamera) buildArgs() []string {
 	if p.IDRPeriod > 0 {
 		args = append(args, "--intra", strconv.FormatUint(uint64(p.IDRPeriod), 10))
 	}
-	if c.rotation == 180 {
-		args = append(args, "--rotation", "180")
+	if c.rotation != 0 {
+		args = append(args, "--rotation", strconv.Itoa(c.rotation))
 	}
 	if p.HFlip {
 		args = append(args, "--hflip")

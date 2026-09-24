@@ -29,12 +29,44 @@ type SnapshotBuffer struct {
 	enabled   bool
 	stillBin  string // still-capture binary (camera.still_bin)
 	ffmpegBin string // transcode binary (camera.ffmpeg_bin)
+	// Device transform baked into the stream (SPEC appendix A #9/#19) —
+	// tier-1 rpicam-still must apply the same flags or its JPEGs would
+	// mismatch the (transformed) stream. Set before Start via SetTransform.
+	rotation int
+	hflip    bool
+	vflip    bool
 }
 
 // NewSnapshotBuffer creates a new SnapshotBuffer. The binaries come from
 // camera config (still_bin / ffmpeg_bin) — no defaults are invented here.
 func NewSnapshotBuffer(enabled bool, stillBin, ffmpegBin string) *SnapshotBuffer {
 	return &SnapshotBuffer{enabled: enabled, stillBin: stillBin, ffmpegBin: ffmpegBin}
+}
+
+// SetTransform pins the device-level transform (SPEC appendix A #9/#19)
+// so tier-1 rpicam-still snapshots match the stream orientation. Call
+// before the buffer serves requests.
+func (sb *SnapshotBuffer) SetTransform(rotation int, hflip, vflip bool) {
+	sb.mu.Lock()
+	defer sb.mu.Unlock()
+	sb.rotation = rotation
+	sb.hflip = hflip
+	sb.vflip = vflip
+}
+
+// stillArgs builds the transform-carrying tail of the rpicam-still argv.
+func (sb *SnapshotBuffer) stillArgs() []string {
+	var args []string
+	if sb.rotation != 0 {
+		args = append(args, "--rotation", fmt.Sprintf("%d", sb.rotation))
+	}
+	if sb.hflip {
+		args = append(args, "--hflip")
+	}
+	if sb.vflip {
+		args = append(args, "--vflip")
+	}
+	return args
 }
 
 // Update stores the latest IDR frame data from an AUHub access unit.
@@ -163,11 +195,16 @@ func (sb *SnapshotBuffer) captureStill() ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, sb.stillBin,
+	sb.mu.RLock()
+	transformArgs := sb.stillArgs()
+	sb.mu.RUnlock()
+	cmdArgs := []string{
 		"-o", "-",
 		"--nopreview",
 		"-t", "100", // 100ms timeout — fail fast if camera is busy
-	)
+	}
+	cmdArgs = append(cmdArgs, transformArgs...)
+	cmd := exec.CommandContext(ctx, sb.stillBin, cmdArgs...)
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = io.Discard

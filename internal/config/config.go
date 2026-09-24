@@ -40,6 +40,20 @@ type CameraConfig struct {
 	MaxBackoff      time.Duration `yaml:"max_backoff"`       // Max subprocess restart backoff
 	HFlip           bool          `yaml:"hflip"`             // Device-level horizontal mirror (baked into the encoded stream)
 	VFlip           bool          `yaml:"vflip"`             // Device-level vertical flip (upside-down mount compensation)
+	Rotation        int           `yaml:"rotation"`          // Device-level rotation, clockwise degrees 0|90|180|270 (SPEC appendix A #19; baked into the stream; rpicamvid/v4l2 modes only)
+}
+
+// EffectiveDims returns the stream resolution after camera.rotation is
+// baked in (SPEC appendix A #19): 90°/270° swap width/height. Everything
+// that announces dimensions (encoder config, ONVIF Profile S, /api/status,
+// AI detection scaling) must use these, not the raw capture dimensions.
+func (c *CameraConfig) EffectiveDims() (int, int) {
+	switch c.Rotation {
+	case 90, 270:
+		return c.Height, c.Width
+	default:
+		return c.Width, c.Height
+	}
 }
 
 // RTSPConfig holds RTSP server settings.
@@ -236,6 +250,7 @@ func DefaultConfig() *Config {
 			MaxBackoff:      30 * time.Second,
 			HFlip:           false,
 			VFlip:           false,
+			Rotation:        0,
 		},
 		RTSP: RTSPConfig{
 			Port:                 8554,
@@ -557,6 +572,26 @@ func (c *Config) Validate() error {
 	case "mtxrpicam", "rpicamvid", "rtsp", "v4l2":
 	default:
 		return fmt.Errorf("config.camera.mode: must be one of mtxrpicam|rpicamvid|rtsp|v4l2, got %q", c.Camera.Mode)
+	}
+	switch c.Camera.Rotation {
+	case 0, 90, 180, 270:
+	default:
+		return fmt.Errorf("config.camera.rotation: must be 0, 90, 180 or 270 (degrees clockwise), got %d", c.Camera.Rotation)
+	}
+	if c.Camera.Rotation != 0 {
+		switch c.Camera.Mode {
+		case "rpicamvid", "v4l2":
+		default:
+			return fmt.Errorf("config.camera.rotation: only supported in rpicamvid and v4l2 modes (mode %q has no raw-pixel or libcamera-transform path)",
+				c.Camera.Mode)
+		}
+	}
+	if (c.Camera.Rotation == 90 || c.Camera.Rotation == 270) &&
+		(c.Camera.Width%2 != 0 || c.Camera.Height%2 != 0) {
+		// The 90°/270° transpose re-lays the 4:2:0 chroma planes; odd
+		// capture dimensions would desynchronize the flip pass that runs
+		// on the rotated frame (H.264 4:2:0 needs even anyway).
+		return fmt.Errorf("config.camera: width and height must be even when camera.rotation is 90 or 270")
 	}
 	if c.Camera.Codec != "h264" && c.Camera.Codec != "h265" {
 		return fmt.Errorf("config.camera.codec: %w", errInvalidCodec)

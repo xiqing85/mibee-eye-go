@@ -154,7 +154,7 @@ func (s *Server) handleStreamMSE(w http.ResponseWriter, r *http.Request, cameraI
 // cameraDimensions reports the configured capture size for the init segment.
 func (s *Server) cameraDimensions() (uint32, uint32) {
 	if oc := s.cfg.OnvifConfig; oc != nil {
-		return uint32(oc.CameraWidth()), uint32(oc.CameraHeight())
+		return uint32(oc.CameraEffectiveWidth()), uint32(oc.CameraEffectiveHeight())
 	}
 	return 1280, 720
 }

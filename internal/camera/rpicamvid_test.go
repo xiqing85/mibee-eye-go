@@ -2,6 +2,8 @@ package camera
 
 import (
 	"bytes"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/xiqing85/mibee-eye-go/internal/h264"
@@ -236,5 +238,36 @@ func TestBuildArgsFlips(t *testing.T) {
 	}
 	if !hasH || !hasV {
 		t.Errorf("expected --hflip and --vflip in args, got %v", got)
+	}
+}
+
+func TestBuildArgsRotation(t *testing.T) {
+	// Device-level rotation (SPEC appendix A #19) reaches the rpicam-vid
+	// command line for every quarter turn — baked by libcamera transform.
+	for _, rotation := range []int{0, 90, 180, 270} {
+		c := NewRPiCamVidCamera(
+			WithVidBinPath("rpicam-vid"),
+			WithVidParams(DefaultParams()),
+			WithVidInfo(CameraInfo{}),
+			WithVidRotation(rotation),
+		)
+		args := c.buildArgs()
+		want := "--rotation " + strconv.Itoa(rotation)
+		joined := " " + strings.Join(args, " ") + " "
+		if rotation == 0 {
+			if strings.Contains(joined, "--rotation") {
+				t.Errorf("rotation 0: unexpected --rotation in args: %v", args)
+			}
+			continue
+		}
+		if !strings.Contains(joined, " "+want+" ") {
+			t.Errorf("rotation %d: expected %q in args, got %v", rotation, want, args)
+		}
+	}
+	// Out-of-enum values normalize to 0 (validation rejects upstream).
+	c := NewRPiCamVidCamera(WithVidBinPath("rpicam-vid"), WithVidParams(DefaultParams()),
+		WithVidInfo(CameraInfo{}), WithVidRotation(45))
+	if args := c.buildArgs(); strings.Contains(strings.Join(args, " "), "--rotation") {
+		t.Errorf("rotation 45 should normalize to 0, got %v", args)
 	}
 }
