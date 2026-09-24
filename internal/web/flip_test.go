@@ -209,3 +209,21 @@ func TestImagingParamsReflectFlip(t *testing.T) {
 		t.Fatalf("imaging params VFlip must be true, got %v", params["VFlip"])
 	}
 }
+
+func TestGetConfigCameraSectionIncludesRotation(t *testing.T) {
+	// SPEC appendix A #19: rotation must be overlaid from the provider
+	// even when the YAML file never carried the key — otherwise the
+	// settings editor has no field to edit it with.
+	s, _, _ := flipServer(t, multiSectionYAML)
+	cookie, _ := specLogin(t, s)
+
+	rec := doReq(t, s, http.MethodGet, "/api/config", "", map[string]string{"Cookie": cookie})
+	cam := decode(t, rec)["data"].(map[string]interface{})["camera"].(map[string]interface{})
+	v, ok := cam["rotation"]
+	if !ok {
+		t.Fatal("camera.rotation must be present in GET /api/config")
+	}
+	if f, ok := v.(float64); !ok || f != 0 {
+		t.Fatalf("camera.rotation = %v (%T), want 0", v, v)
+	}
+}
