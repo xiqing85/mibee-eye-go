@@ -13,6 +13,23 @@ Notable changes to MiBee Eye (Go implementation) are documented here.
 
 ## [Unreleased]
 
+- **Device-level rotation baked into the stream** (SPEC v1 appendix A
+  #19): new `camera.rotation` key (0 | 90 | 180 | 270, clockwise
+  degrees) rotates the stream for every consumer — RTSP, ONVIF, GB28181,
+  recordings, snapshots and AI detection all see it, with 90/270
+  swapping the announced resolution (ONVIF Profile S, `/api/status`,
+  MSE, AI bbox space). Mode support: `rpicamvid` bakes it via
+  rpicam-vid's libcamera transform (`--rotation`), `v4l2` transposes the
+  raw YU12 frames in-process; `mtxrpicam`/`rtsp` reject non-zero values
+  at validation. Validation also requires quarter turns and even capture
+  dimensions for 90/270. Tier-1 rpicam-still snapshots now apply the
+  stream's transform flags (`--rotation/--hflip/--vflip`) so JPEGs match
+  the video orientation — flips previously missed there too. Bonus: the
+  v4l2 backend now actually applies the device flips (they were silently
+  ignored before), including runtime changes (web imaging / GB
+  FrameMirror) via transform atomics. Previously `camera.rotation` was a
+  display-only CSS convention on the web UI — retired in the same
+  frontend (webui PR #11).
 - **Device serial fallback** (issue #39): an empty `device.serial_number`
   no longer reaches `GetDeviceInformation` — after config/env, the boot
   probes a device-level, interface-independent identity (Raspberry Pi

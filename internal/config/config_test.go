@@ -472,6 +472,85 @@ func TestValidateAllCameraModesAccepted(t *testing.T) {
 	}
 }
 
+// SPEC appendix A #19: rotation is quarter turns only, supported by the
+// rpicamvid (libcamera transform) and v4l2 (Go-side transpose) modes,
+// and 90/270 additionally require even capture dimensions.
+func TestValidateRotationQuarterTurnsOnly(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Camera.Mode = "rpicamvid"
+	for _, rotation := range []int{0, 90, 180, 270} {
+		cfg.Camera.Rotation = rotation
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("rotation %d should validate: %v", rotation, err)
+		}
+	}
+	cfg.Camera.Rotation = 45
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("rotation 45 must fail validation")
+	} else if !strings.Contains(err.Error(), "camera.rotation") {
+		t.Fatalf("error should mention camera.rotation, got: %v", err)
+	}
+}
+
+func TestValidateRotationModeSupport(t *testing.T) {
+	for _, mode := range []string{"mtxrpicam", "rtsp"} {
+		cfg := DefaultConfig()
+		cfg.Camera.Mode = mode
+		cfg.Camera.Rotation = 90
+		if err := cfg.Validate(); err == nil {
+			t.Fatalf("rotation in mode %q must fail validation", mode)
+		} else if !strings.Contains(err.Error(), "camera.rotation") {
+			t.Fatalf("error should mention camera.rotation, got: %v", err)
+		}
+	}
+	// Rotation 0 stays valid everywhere.
+	for _, mode := range []string{"mtxrpicam", "rtsp"} {
+		cfg := DefaultConfig()
+		cfg.Camera.Mode = mode
+		cfg.Camera.Rotation = 0
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("rotation 0 in mode %q should validate: %v", mode, err)
+		}
+	}
+}
+
+func TestValidateRotationEvenDimsFor90And270(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Camera.Mode = "v4l2"
+	cfg.Camera.Width = 1281
+	cfg.Camera.Rotation = 90
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("odd width with rotation 90 must fail validation")
+	} else if !strings.Contains(err.Error(), "even") {
+		t.Fatalf("error should mention even dims, got: %v", err)
+	}
+	// 180 keeps the dimensions — odd capture dims stay acceptable.
+	cfg.Camera.Rotation = 180
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("rotation 180 with odd dims should validate: %v", err)
+	}
+}
+
+func TestCameraEffectiveDims(t *testing.T) {
+	cam := DefaultConfig().Camera
+	cam.Width, cam.Height = 640, 480
+	if w, h := cam.EffectiveDims(); w != 640 || h != 480 {
+		t.Fatalf("rotation 0: got %d,%d want 640,480", w, h)
+	}
+	cam.Rotation = 180
+	if w, h := cam.EffectiveDims(); w != 640 || h != 480 {
+		t.Fatalf("rotation 180: got %d,%d want 640,480", w, h)
+	}
+	cam.Rotation = 90
+	if w, h := cam.EffectiveDims(); w != 480 || h != 640 {
+		t.Fatalf("rotation 90: got %d,%d want 480,640", w, h)
+	}
+	cam.Rotation = 270
+	if w, h := cam.EffectiveDims(); w != 480 || h != 640 {
+		t.Fatalf("rotation 270: got %d,%d want 480,640", w, h)
+	}
+}
+
 func TestEncoderDeviceDefault(t *testing.T) {
 	cfg := DefaultConfig()
 	if cfg.Camera.EncoderDevice != "/dev/video11" {

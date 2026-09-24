@@ -17,6 +17,7 @@ import (
 	"log/slog"
 	"os/exec"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/xiqing85/mibee-eye-go/internal/h264"
@@ -50,6 +51,18 @@ type V4L2Source struct {
 	encoder frameEncoder
 	stopCh  chan struct{}
 	wg      sync.WaitGroup
+
+	// Device-level transform state (SPEC appendix A #9/#19), applied to
+	// every frame in pump() before encoding — baked into the stream for
+	// every consumer. Rotation is boot-static; flips read per frame so
+	// runtime changes (GB FrameMirror) take effect immediately in this
+	// backend, closing the mem-only gap the subprocess backends keep.
+	rotation  int
+	flipH     atomic.Bool
+	flipV     atomic.Bool
+	capW      int // raw capture dims (transform reads these per frame)
+	capH      int
+	txScratch []byte // rotate/flip scratch, reused frame to frame (pump only)
 
 	// Injection points so tests can cover selection without hardware.
 	probeEncoder func(path string) (v4l2.ProbeResult, error)
@@ -91,6 +104,13 @@ func WithV4L2Info(i CameraInfo) V4L2Option {
 // (required when the ffmpeg path is taken; default lives in config).
 func WithV4L2FFmpegBin(bin string) V4L2Option {
 	return func(s *V4L2Source) { s.ffmpegBin = bin }
+}
+
+// WithV4L2Rotation sets the device-level rotation in degrees clockwise
+// (0|90|180|270, SPEC appendix A #19), baked into the frames in pump()
+// before encoding. 90/270 swap the encoder-side dimensions.
+func WithV4L2Rotation(degrees int) V4L2Option {
+	return func(s *V4L2Source) { s.rotation = NormalizeRotation(degrees) }
 }
 
 // WithV4L2Probe overrides the encoder-node probe (tests).
@@ -146,11 +166,22 @@ func (s *V4L2Source) Info() CameraInfo { return s.info }
 
 // SetParam stores imaging parameters in memory. Values cannot reach the
 // sensor through this backend (same contract as the rtsp source): the web
-// UI stays consistent and ONVIF reads them back.
+// UI stays consistent and ONVIF reads them back. Exception: the device
+// flip axes (hFlip/vFlip) feed the transform atomics, so runtime changes
+// (web imaging, GB FrameMirror) take effect from the next frame — this
+// backend owns raw pixels, unlike the subprocess backends.
 func (s *V4L2Source) SetParam(name string, value interface{}) error {
 	s.paramsMu.Lock()
 	defer s.paramsMu.Unlock()
 	s.memParams[name] = value
+	if b, ok := value.(bool); ok {
+		switch name {
+		case "hFlip", "HFlip":
+			s.flipH.Store(b)
+		case "vFlip", "VFlip":
+			s.flipV.Store(b)
+		}
+	}
 	return nil
 }
 
@@ -169,6 +200,11 @@ func (s *V4L2Source) GetParam(name string) (interface{}, error) {
 func (s *V4L2Source) Start(ctx context.Context) error {
 	w := uint32(s.params.Width)
 	h := uint32(s.params.Height)
+	s.rotation = NormalizeRotation(s.rotation)
+	s.capW, s.capH = int(w), int(h)
+	// Seed the flip atomics from config; runtime SetParam updates them.
+	s.flipH.Store(s.params.HFlip)
+	s.flipV.Store(s.params.VFlip)
 
 	if s.device == "" {
 		return fmt.Errorf("v4l2 source: capture device not configured (camera.device)")
@@ -179,9 +215,16 @@ func (s *V4L2Source) Start(ctx context.Context) error {
 	}
 	s.capture = cap
 
+	// The encoder consumes post-transform frames: rotate first, then
+	// flips (SPEC appendix A #19) — so 90/270 swap its dimensions while
+	// the capture node keeps the sensor-side ones.
+	ew, eh := w, h
+	if s.rotation == 90 || s.rotation == 270 {
+		ew, eh = h, w
+	}
 	emit := s.emit
 	if res, err := s.probeEncoder(s.encoderDevice); err == nil && res.M2MCapable {
-		if enc, err := s.openM2M(s.encoderDevice, w, h); err == nil {
+		if enc, err := s.openM2M(s.encoderDevice, ew, eh); err == nil {
 			if m, ok := enc.(*m2mEncoder); ok {
 				m.onAU = emit
 			}
@@ -196,7 +239,9 @@ func (s *V4L2Source) Start(ctx context.Context) error {
 		if s.ffmpegBin == "" { // test escape: encoder chosen explicitly as nil-ffmpeg
 			return fmt.Errorf("v4l2 source: no encoder available")
 		}
-		fe, err := newFFmpegEncoder(s.ffmpegBin, s.params, func(au []h264.NALU, key bool) {
+		p := s.params
+		p.Width, p.Height = ew, eh
+		fe, err := newFFmpegEncoder(s.ffmpegBin, p, func(au []h264.NALU, key bool) {
 			s.emit(au, key)
 		})
 		if err != nil {
@@ -205,6 +250,10 @@ func (s *V4L2Source) Start(ctx context.Context) error {
 			return fmt.Errorf("v4l2 source: %w", err)
 		}
 		s.encoder = fe
+	}
+	if s.rotation != 0 || s.params.HFlip || s.params.VFlip {
+		slog.Info("v4l2 source: device transform baked in",
+			"rotation", s.rotation, "hflip", s.params.HFlip, "vflip", s.params.VFlip)
 	}
 	slog.Info("v4l2 source: capture started", "device", s.device, "encoder", s.encoder.Name(),
 		"width", w, "height", h)
@@ -270,6 +319,21 @@ func (s *V4L2Source) pump() {
 		}
 		yuv := make([]byte, len(frame))
 		copy(yuv, frame) // leave the MMAP buffer before the next DQBUF
+		// Device-level transform (SPEC appendix A #9/#19): rotation first,
+		// then flips — baked into the encoded stream for every consumer.
+		// 180° folds into the flip flags (ComposeRotationFlips), 90/270
+		// transpose through the reused scratch and swap the frame dims.
+		rot, hf, vf := ComposeRotationFlips(s.rotation, s.flipH.Load(), s.flipV.Load())
+		fw, fh := s.capW, s.capH
+		if rot == 90 || rot == 270 {
+			fw, fh = RotateYU12(&yuv, &s.txScratch, s.capW, s.capH, rot)
+		}
+		if hf || vf {
+			if len(s.txScratch) < fw {
+				s.txScratch = make([]byte, fw)
+			}
+			FlipYU12(yuv, fw, fh, hf, vf, s.txScratch)
+		}
 		count++
 		pts := uint64(time.Since(start).Milliseconds()) * 90
 		if err := s.encoder.Encode(yuv, pts); err != nil {
