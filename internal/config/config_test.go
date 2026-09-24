@@ -477,7 +477,7 @@ func TestValidateAllCameraModesAccepted(t *testing.T) {
 // and 90/270 additionally require even capture dimensions.
 func TestValidateRotationQuarterTurnsOnly(t *testing.T) {
 	cfg := DefaultConfig()
-	cfg.Camera.Mode = "rpicamvid"
+	cfg.Camera.Mode = "v4l2" // full quarter-turn range
 	for _, rotation := range []int{0, 90, 180, 270} {
 		cfg.Camera.Rotation = rotation
 		if err := cfg.Validate(); err != nil {
@@ -489,6 +489,27 @@ func TestValidateRotationQuarterTurnsOnly(t *testing.T) {
 		t.Fatal("rotation 45 must fail validation")
 	} else if !strings.Contains(err.Error(), "camera.rotation") {
 		t.Fatalf("error should mention camera.rotation, got: %v", err)
+	}
+}
+
+func TestValidateRotationRpicamvidNoTranspose(t *testing.T) {
+	// Raspberry Pi libcamera rejects transpose transforms, so the
+	// rpicamvid mode only bakes 0/180 (flip-based); 90/270 must be
+	// rejected instead of crashing rpicam-vid in a restart loop
+	// (verified live on Pi 3B / IMX219 / libcamera 0.7.1).
+	cfg := DefaultConfig()
+	cfg.Camera.Mode = "rpicamvid"
+	cfg.Camera.Rotation = 180
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("rotation 180 in rpicamvid should validate: %v", err)
+	}
+	for _, rotation := range []int{90, 270} {
+		cfg.Camera.Rotation = rotation
+		if err := cfg.Validate(); err == nil {
+			t.Fatalf("rotation %d in rpicamvid must fail validation", rotation)
+		} else if !strings.Contains(err.Error(), "transpose") {
+			t.Fatalf("error should explain the transpose limit, got: %v", err)
+		}
 	}
 }
 

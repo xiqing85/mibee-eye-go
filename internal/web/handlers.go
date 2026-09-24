@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/xiqing85/mibee-eye-go/internal/camera"
+	"github.com/xiqing85/mibee-eye-go/internal/config"
 
 	"gopkg.in/yaml.v3"
 )
@@ -125,6 +126,19 @@ func (s *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 	out, err := yaml.Marshal(cfg)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to marshal config: %v", err))
+		return
+	}
+	// Validate the merged document BEFORE it reaches disk: boot-time
+	// validation exits the process, so persisting an invalid config would
+	// brick the service in a systemd restart loop (found live with
+	// camera.rotation: 45 — PUT answered 200 and the device went down).
+	var check config.Config
+	if err := yaml.Unmarshal(out, &check); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("merged config rejected: %v", err))
+		return
+	}
+	if err := check.Validate(); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("merged config rejected: %v", err))
 		return
 	}
 	if err := atomicWrite(s.cfg.ConfigPath, out); err != nil {

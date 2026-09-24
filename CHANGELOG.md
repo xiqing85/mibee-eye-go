@@ -18,10 +18,14 @@ Notable changes to MiBee Eye (Go implementation) are documented here.
   degrees) rotates the stream for every consumer — RTSP, ONVIF, GB28181,
   recordings, snapshots and AI detection all see it, with 90/270
   swapping the announced resolution (ONVIF Profile S, `/api/status`,
-  MSE, AI bbox space). Mode support: `rpicamvid` bakes it via
-  rpicam-vid's libcamera transform (`--rotation`), `v4l2` transposes the
-  raw YU12 frames in-process; `mtxrpicam`/`rtsp` reject non-zero values
-  at validation. Validation also requires quarter turns and even capture
+  MSE, AI bbox space). Mode support: `v4l2` transposes the raw YU12
+  frames in-process (full quarter-turn range); `rpicamvid` accepts
+  **0/180 only** — Raspberry Pi libcamera (vc4/PiSP) rejects transpose
+  transforms (verified live: Pi 3B / IMX219 / libcamera 0.7.1 →
+  "transforms requiring transpose not supported", rpicam-vid crash
+  loop), so 90/270 are rejected at validation with a pointer to the
+  v4l2 mode; `mtxrpicam`/`rtsp` reject non-zero values at validation.
+  Validation also requires quarter turns and even capture
   dimensions for 90/270. Tier-1 rpicam-still snapshots now apply the
   stream's transform flags (`--rotation/--hflip/--vflip`) so JPEGs match
   the video orientation — flips previously missed there too. Bonus: the
@@ -30,6 +34,14 @@ Notable changes to MiBee Eye (Go implementation) are documented here.
   FrameMirror) via transform atomics. Previously `camera.rotation` was a
   display-only CSS convention on the web UI — retired in the same
   frontend (webui PR #11).
+- **PUT /api/config validates before persisting** (found live during the
+  rotation verification): the deep-merge path wrote the YAML and
+  answered 200 without validating — an invalid value (e.g.
+  `camera.rotation: 45`, or a zero fps) survived to the next boot, where
+  config validation exits the process → systemd restart loop, device
+  down. The merged document is now parsed + validated before the atomic
+  write; invalid input answers 400 and leaves the file (and the running
+  service) untouched.
 - **Device serial fallback** (issue #39): an empty `device.serial_number`
   no longer reaches `GetDeviceInformation` — after config/env, the boot
   probes a device-level, interface-independent identity (Raspberry Pi
