@@ -36,7 +36,8 @@ camera:
   codec: h264
   # Device-level rotation baked into the stream (SPEC appendix A #19):
   # 0 | 90 | 180 | 270 (degrees clockwise); 90/270 swap the effective
-  # stream resolution. Supported in rpicamvid and v4l2 modes only.
+  # stream resolution. v4l2 mode: full range (in-process transpose).
+  # rpicamvid mode: 0/180 only — Pi libcamera has no transpose support.
   rotation: 0
 
   # Target bitrate in bits per second (2 Mbps)
