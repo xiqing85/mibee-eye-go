@@ -14,10 +14,11 @@
 Description=MiBee Eye - ONVIF Camera Server (Go)
 After=network-online.target
 Wants=network-online.target
-# Deliberate self-restarts (config save; imaging flips bake into the
-# pipeline via restart — SPEC 附录A #9) must not trip the rate limiter.
-StartLimitIntervalSec=180
-StartLimitBurst=10
+# No explicit StartLimit*: with RestartSec=5 the default 10s/5-start
+# window is unreachable, so deliberate self-restarts (config save, rotate,
+# imaging flips — SPEC 附录A #9) can slow the service but never hit
+# start-limit — which has no auto-recovery and leaves the camera dead
+# until a human intervenes. Matches the rs unit's posture.
 
 [Service]
 Type=simple
