@@ -240,15 +240,20 @@ type M2MEncoderOptions struct {
 	RepeatSeqHeader bool
 }
 
-// v4l2ExtControl mirrors struct v4l2_ext_control (24 bytes, 64-bit ABI):
-// the value union carries int32/int64 payloads; pointer members are not
-// used by the codec controls.
+// v4l2ExtControl mirrors struct v4l2_ext_control (20 bytes, 64-bit UABI —
+// the struct AND its value union are both __attribute__((packed))). The
+// packed union lands at offset 12; declaring it as a naturally-aligned
+// int64 would move the value to offset 16 and the driver would read the
+// alignment padding (zero) — the exact bug that starved the bcm2835
+// encoder to its minimum bitrate while FORCE_KEY_FRAME (button, value
+// ignored) kept working. Codec-class controls are all s32/button payloads;
+// the wider union arms stay unused.
 type v4l2ExtControl struct {
 	ID         uint32
 	Size       uint32
 	Reserved2  uint32
-	_          uint32
-	ValueUnion int64
+	Value      int32
+	_          [4]byte // tail of the packed 8-byte union (value64/ptr)
 }
 
 // v4l2ExtControls mirrors struct v4l2_ext_controls (32 bytes).
@@ -262,11 +267,11 @@ type v4l2ExtControls struct {
 	Controls  *v4l2ExtControl
 }
 
-// setExtCtrl issues VIDIOC_S_EXT_CTRLS for one int-valued control. Codec
+// setExtCtrl issues VIDIOC_S_EXT_CTRLS for one s32-valued control. Codec
 // controls live in a control class — many drivers (bcm2835 included) only
 // implement the extended ioctl and answer legacy S_CTRL with ENOTTY.
-func setExtCtrl(fd uintptr, id uint32, value int64) error {
-	one := v4l2ExtControl{ID: id, ValueUnion: value}
+func setExtCtrl(fd uintptr, id uint32, value int32) error {
+	one := v4l2ExtControl{ID: id, Value: value}
 	many := v4l2ExtControls{Count: 1, Controls: &one}
 	return ioctl(fd, vidiocSExtCtrls, unsafe.Pointer(&many))
 }

@@ -146,6 +146,11 @@ func (sb *SnapshotBuffer) Snapshot() ([]byte, string, error) {
 	if data, err := sb.h264ToJPEG(buf.Bytes()); err == nil {
 		slog.Debug("snapshot: cached IDR transcoded to JPEG via ffmpeg")
 		return data, "image/jpeg", nil
+	} else {
+		// Not silent: a tier-2 failure drops the consumer to raw H.264 —
+		// say why so the device can tell us (found live: 3s was too
+		// tight for cold ffmpeg on a loaded Pi 3B, ~2.4s measured).
+		slog.Warn("snapshot: IDR transcode to JPEG failed, falling back to raw H.264", "error", err)
 	}
 
 	// Tier 3: raw access unit, honest content type.
@@ -226,6 +231,19 @@ func (sb *SnapshotBuffer) captureStill() ([]byte, error) {
 	return data, nil
 }
 
+// transcodeArgs builds the ffmpeg argv for the tier-2 IDR→JPEG transcode:
+// Annex-B AU on stdin, single JPEG frame on stdout. The output muxer must
+// be pipe-safe — `-f image2` writing to pipe:1 while reading pipe:0 hangs
+// ffmpeg 7.1.5 (deb13, the Pi image) forever; only the device shows it.
+func (sb *SnapshotBuffer) transcodeArgs() []string {
+	return []string{
+		"-loglevel", "error",
+		"-f", "h264", "-i", "pipe:0",
+		"-frames:v", "1", "-q:v", "3",
+		"-f", "mjpeg", "pipe:1",
+	}
+}
+
 // h264ToJPEG transcodes one Annex-B H.264 access unit into a single JPEG
 // frame via the ffmpeg binary (already a device dependency for the AI
 // keyframe decoder). Errors leave the caller to the raw-IDR tier.
@@ -233,15 +251,14 @@ func (sb *SnapshotBuffer) h264ToJPEG(annexB []byte) ([]byte, error) {
 	if sb.ffmpegBin == "" {
 		return nil, fmt.Errorf("ffmpeg bin not configured (camera.ffmpeg_bin)")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	// Cold ffmpeg start on a fully-loaded Pi 3B measures ~2.4s just for
+	// spawn+decode of one frame; 3s dropped tier 2 under load spikes.
+	// Snapshots are rare, user/NVR-triggered operations — the client is
+	// waiting either way, so budget generously.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, sb.ffmpegBin,
-		"-loglevel", "error",
-		"-f", "h264", "-i", "pipe:0",
-		"-frames:v", "1", "-q:v", "3",
-		"-f", "image2", "-c:v", "mjpeg", "pipe:1",
-	)
+	cmd := exec.CommandContext(ctx, sb.ffmpegBin, sb.transcodeArgs()...)
 	cmd.Stdin = bytes.NewReader(annexB)
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout

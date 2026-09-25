@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"os/exec"
+	"strings"
 	"testing"
 
 	"github.com/xiqing85/mibee-eye-go/internal/h264"
@@ -126,5 +127,29 @@ func TestStillArgsCarryDeviceTransform(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("args = %v want %v", got, want)
 		}
+	}
+}
+
+func TestTranscodeArgsUsePipeSafeMuxer(t *testing.T) {
+	// Tier-2 transcode runs ffmpeg with BOTH ends on pipes (Annex-B AU on
+	// stdin, JPEG on stdout). ffmpeg 7.1.5 (deb13, the Pi image) hangs
+	// forever on `-f image2` writing to pipe:1 while reading pipe:0 — the
+	// single-frame mjpeg muxer is pipe-safe across every build tested
+	// (workstation, CI, Pi). Pinned so the flag can't regress silently
+	// again: the hang only shows on the device, green CI proves nothing.
+	sb := NewSnapshotBuffer(true, "rpicam-still", "ffmpeg")
+	args := sb.transcodeArgs()
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "-f mjpeg pipe:1") {
+		t.Fatalf("transcode args must write via the mjpeg muxer to pipe:1, got %q", joined)
+	}
+	if strings.Contains(joined, "image2") {
+		t.Fatalf("transcode args must not use the image2 muxer (hangs ffmpeg 7.1.5 on pipe:1 with pipe:0 input), got %q", joined)
+	}
+	if !strings.Contains(joined, "-f h264 -i pipe:0") {
+		t.Fatalf("transcode args must read the Annex-B AU from pipe:0, got %q", joined)
+	}
+	if !strings.Contains(joined, "-frames:v 1") {
+		t.Fatalf("transcode args must cap output at one frame, got %q", joined)
 	}
 }
