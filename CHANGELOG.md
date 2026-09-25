@@ -19,12 +19,11 @@ Notable changes to MiBee Eye (Go implementation) are documented here.
   recordings, snapshots and AI detection all see it, with 90/270
   swapping the announced resolution (ONVIF Profile S, `/api/status`,
   MSE, AI bbox space). Mode support: `v4l2` transposes the raw YU12
-  frames in-process (full quarter-turn range); `rpicamvid` accepts
-  **0/180 only** — Raspberry Pi libcamera (vc4/PiSP) rejects transpose
-  transforms (verified live: Pi 3B / IMX219 / libcamera 0.7.1 →
-  "transforms requiring transpose not supported", rpicam-vid crash
-  loop), so 90/270 are rejected at validation with a pointer to the
-  v4l2 mode; `mtxrpicam`/`rtsp` reject non-zero values at validation.
+  frames in-process (full quarter-turn range); `rpicamvid` initially
+  shipped 0/180 only (Pi libcamera rejects transpose transforms —
+  verified live on Pi 3B / IMX219 / libcamera 0.7.1) and now covers the
+  full range via the raw-YUV pipeline (entry above);
+  `mtxrpicam`/`rtsp` reject non-zero values at validation.
   Validation also requires quarter turns and even capture
   dimensions for 90/270. Tier-1 rpicam-still snapshots now apply the
   stream's transform flags (`--rotation/--hflip/--vflip`) so JPEGs match
@@ -34,6 +33,19 @@ Notable changes to MiBee Eye (Go implementation) are documented here.
   FrameMirror) via transform atomics. Previously `camera.rotation` was a
   display-only CSS convention on the web UI — retired in the same
   frontend (webui PR #11).
+- **rpicamvid 90°/270° rotation via the raw-YUV pipeline**: Raspberry Pi
+  libcamera rejects transpose transforms (the previous release therefore
+  limited rpicamvid to 0/180), but the original ask was full
+  clockwise/counter-clockwise support — rotation 90/270 now switches the
+  subprocess to `--codec yuv420` (raw fixed-size I420 frames, no
+  libcamera transform involved) and bakes the rotation in-process:
+  transpose + flips in Go, then hardware V4L2 M2M encode (ffmpeg
+  fallback) — the same architecture the Rust twin runs. Encoder is
+  resolved at start (fails loud, no crash loop), opened with swapped
+  dimensions; runtime flips (web imaging / GB FrameMirror) apply from
+  the next frame via transform atomics; ForceIDR (DeviceControl
+  IFrameCmd) now works on this path too via the M2M encoder. 0/180 keep
+  the zero-CPU rpicam-vid H.264 path.
 - **PUT /api/config validates before persisting** (found live during the
   rotation verification): the deep-merge path wrote the YAML and
   answered 200 without validating — an invalid value (e.g.

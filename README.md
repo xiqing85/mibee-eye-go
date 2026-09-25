@@ -98,7 +98,7 @@ See `configs/config.example.yaml` for all configuration options. Key settings in
 - `camera.bitrate` - Video bitrate in bits per second
 - `camera.idr_period` - Keyframe interval; also bounds the AI detection cadence
 - `camera.hflip` / `camera.vflip` - Flips baked into the stream (applied via unified restart)
-- `camera.rotation` - Quarter-turn rotation (0/90/180/270° clockwise) baked into the stream; 90/270 swap the announced resolution (v4l2 mode, in-process transpose; rpicamvid mode 0/180 only — Pi libcamera has no transpose support; other modes reject non-zero)
+- `camera.rotation` - Quarter-turn rotation (0/90/180/270° clockwise) baked into the stream; 90/270 swap the announced resolution. rpicamvid: 0/180 via libcamera flips, 90/270 via a raw-YUV subprocess + in-process transpose + hardware M2M encode (Pi libcamera has no transpose support); v4l2: in-process transpose; other modes reject non-zero
 - `rtsp.port` - RTSP streaming port (8554 default)
 - `onvif.port` - ONVIF HTTP/SOAP port (8080 default)
 - `onvif.username/password` - ONVIF authentication credentials
