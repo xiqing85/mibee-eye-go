@@ -42,6 +42,6 @@ func (*M2MEncoder) RequestKeyframe() error { return errUnsupported32 }
 func (*M2MEncoder) Close() {}
 
 // OpenM2MEncoder reports unsupported on 32-bit targets.
-func OpenM2MEncoder(path string, width, height uint32) (*M2MEncoder, error) {
+func OpenM2MEncoder(path string, width, height uint32, opts M2MEncoderOptions) (*M2MEncoder, error) {
 	return nil, errUnsupported32
 }
