@@ -4,6 +4,7 @@ package web
 // masked-secret restore, section preservation, atomic write.
 
 import (
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -177,5 +178,130 @@ func TestPutConfigInvalidFpsRejected(t *testing.T) {
 	data, _ := os.ReadFile(path)
 	if !strings.Contains(string(data), "fps: 15") {
 		t.Fatalf("original fps must be intact, file: %s", data)
+	}
+}
+
+// SPEC §5 applied:"camera_restart" (2026-09-25 addition): geometry-
+// preserving camera changes apply via the in-place camera restart when
+// the hook is wired; anything that reshapes the stream keeps the full
+// process restart.
+func TestPutConfigGeometryPreservingAppliesInPlace(t *testing.T) {
+	s, _ := configServer(t, multiSectionYAML)
+	restarts, camRestarts := 0, 0
+	s.selfRestart = func() { restarts++ }
+	s.restartCamera = func() error { camRestarts++; return nil }
+	cookie, csrf := specLogin(t, s)
+
+	rec := doReq(t, s, http.MethodPut, "/api/config",
+		`{"camera":{"rotation":180}}`, authHdr(cookie, csrf))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT rotation 180: %d %s", rec.Code, rec.Body.String())
+	}
+	if got := decode(t, rec)["data"].(map[string]interface{})["applied"]; got != "camera_restart" {
+		t.Fatalf("applied = %v, want camera_restart", got)
+	}
+	if camRestarts != 1 || restarts != 0 {
+		t.Fatalf("camRestarts=%d restarts=%d, want 1/0", camRestarts, restarts)
+	}
+
+	// From 180 to 90 the effective dims swap — cross-geometry, so even
+	// with the hook wired the change takes the process restart.
+	rec = doReq(t, s, http.MethodPut, "/api/config",
+		`{"camera":{"rotation":90}}`, authHdr(cookie, csrf))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT rotation 90: %d %s", rec.Code, rec.Body.String())
+	}
+	if got := decode(t, rec)["data"].(map[string]interface{})["applied"]; got != "restart" {
+		t.Fatalf("applied = %v, want restart (180→90 swaps dims)", got)
+	}
+	if restarts != 1 || camRestarts != 1 {
+		t.Fatalf("restarts=%d camRestarts=%d, want 1/1", restarts, camRestarts)
+	}
+
+	// 90↔270 preserves geometry (both transpose to the same dims).
+	camRestarts = 0
+	rec = doReq(t, s, http.MethodPut, "/api/config",
+		`{"camera":{"rotation":270}}`, authHdr(cookie, csrf))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT rotation 270: %d", rec.Code)
+	}
+	if got := decode(t, rec)["data"].(map[string]interface{})["applied"]; got != "camera_restart" {
+		t.Fatalf("applied = %v, want camera_restart (90→270 same dims)", got)
+	}
+	if camRestarts != 1 {
+		t.Fatalf("camRestarts = %d, want 1", camRestarts)
+	}
+}
+
+func TestPutConfigCrossGeometryTakesProcessRestart(t *testing.T) {
+	s, _ := configServer(t, strings.Replace(multiSectionYAML, "mode: rpicamvid", "mode: v4l2", 1))
+	restarts, camRestarts := 0, 0
+	s.selfRestart = func() { restarts++ }
+	s.restartCamera = func() error { camRestarts++; return nil }
+	cookie, csrf := specLogin(t, s)
+
+	// 0 → 90 swaps effective dims → full restart.
+	rec := doReq(t, s, http.MethodPut, "/api/config",
+		`{"camera":{"rotation":90}}`, authHdr(cookie, csrf))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT rotation 90 (v4l2): %d %s", rec.Code, rec.Body.String())
+	}
+	if got := decode(t, rec)["data"].(map[string]interface{})["applied"]; got != "restart" {
+		t.Fatalf("applied = %v, want restart", got)
+	}
+	if restarts != 1 || camRestarts != 0 {
+		t.Fatalf("restarts=%d camRestarts=%d, want 1/0", restarts, camRestarts)
+	}
+}
+
+func TestPutConfigFpsChangeTakesProcessRestart(t *testing.T) {
+	s, _ := configServer(t, multiSectionYAML)
+	restarts, camRestarts := 0, 0
+	s.selfRestart = func() { restarts++ }
+	s.restartCamera = func() error { camRestarts++; return nil }
+	cookie, csrf := specLogin(t, s)
+
+	rec := doReq(t, s, http.MethodPut, "/api/config",
+		`{"camera":{"fps":20}}`, authHdr(cookie, csrf))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT fps 20: %d", rec.Code)
+	}
+	if got := decode(t, rec)["data"].(map[string]interface{})["applied"]; got != "restart" {
+		t.Fatalf("applied = %v, want restart (fps changes SPS VUI timing)", got)
+	}
+}
+
+func TestPutConfigCameraRestartFailureFallsBackToProcessRestart(t *testing.T) {
+	s, _ := configServer(t, multiSectionYAML)
+	restarts := 0
+	s.selfRestart = func() { restarts++ }
+	s.restartCamera = func() error { return errors.New("device busy") }
+	cookie, csrf := specLogin(t, s)
+
+	rec := doReq(t, s, http.MethodPut, "/api/config",
+		`{"camera":{"rotation":180}}`, authHdr(cookie, csrf))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT: %d", rec.Code)
+	}
+	if got := decode(t, rec)["data"].(map[string]interface{})["applied"]; got != "restart" {
+		t.Fatalf("applied = %v, want restart (fallback)", got)
+	}
+	if restarts != 1 {
+		t.Fatalf("restarts = %d, want 1 (fallback fired)", restarts)
+	}
+}
+
+func TestPutConfigNoHookKeepsLegacyRestart(t *testing.T) {
+	s, _ := configServer(t, multiSectionYAML) // restartCamera == nil
+	restarts := 0
+	s.selfRestart = func() { restarts++ }
+	cookie, csrf := specLogin(t, s)
+	rec := doReq(t, s, http.MethodPut, "/api/config",
+		`{"camera":{"rotation":180}}`, authHdr(cookie, csrf))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT: %d", rec.Code)
+	}
+	if got := decode(t, rec)["data"].(map[string]interface{})["applied"]; got != "restart" {
+		t.Fatalf("applied = %v, want restart without hook", got)
 	}
 }

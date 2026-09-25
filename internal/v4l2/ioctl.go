@@ -249,11 +249,11 @@ type M2MEncoderOptions struct {
 // ignored) kept working. Codec-class controls are all s32/button payloads;
 // the wider union arms stay unused.
 type v4l2ExtControl struct {
-	ID         uint32
-	Size       uint32
-	Reserved2  uint32
-	Value      int32
-	_          [4]byte // tail of the packed 8-byte union (value64/ptr)
+	ID        uint32
+	Size      uint32
+	Reserved2 uint32
+	Value     int32
+	_         [4]byte // tail of the packed 8-byte union (value64/ptr)
 }
 
 // v4l2ExtControls mirrors struct v4l2_ext_controls (32 bytes).

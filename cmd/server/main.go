@@ -153,60 +153,12 @@ func (a *configAdapter) RTSPPort() int         { return a.cfg.RTSP.Port }
 func (a *configAdapter) DeviceIP() string      { return a.deviceIP }
 func (a *configAdapter) CameraDevice() string  { return a.cfg.Camera.Device }
 func (a *configAdapter) CameraCodec() string   { return a.cfg.Camera.Codec }
-func (a *configAdapter) CameraBitrate() int    { return a.cfg.Camera.Bitrate }
-func (a *configAdapter) CameraWidth() int      { return a.cfg.Camera.Width }
-func (a *configAdapter) CameraHeight() int     { return a.cfg.Camera.Height }
-func (a *configAdapter) CameraFPS() int        { return a.cfg.Camera.FPS }
-func (a *configAdapter) CameraHFlip() bool     { return a.cfg.Camera.HFlip }
-func (a *configAdapter) CameraVFlip() bool     { return a.cfg.Camera.VFlip }
-func (a *configAdapter) CameraRotation() int   { return a.cfg.Camera.Rotation }
-func (a *configAdapter) CameraEffectiveWidth() int {
-	w, _ := a.cfg.Camera.EffectiveDims()
-	return w
-}
-func (a *configAdapter) CameraEffectiveHeight() int {
-	_, h := a.cfg.Camera.EffectiveDims()
-	return h
-}
-func (a *configAdapter) DeviceName() string         { return a.cfg.Device.Name }
-func (a *configAdapter) DeviceManufacturer() string { return a.cfg.Device.Manufacturer }
-func (a *configAdapter) DeviceModel() string        { return a.cfg.Device.Model }
-func (a *configAdapter) DeviceFirmware() string     { return a.cfg.Device.Firmware }
-func (a *configAdapter) DeviceHardwareID() string   { return a.cfg.Device.HardwareID }
-func (a *configAdapter) DeviceSerialNumber() string { return a.cfg.Device.SerialNumber }
-func (a *configAdapter) LoggingLevel() string       { return a.cfg.Logging.Level }
-func (a *configAdapter) SnapshotEnabled() bool      { return a.cfg.Snapshot.Enabled }
-func (a *configAdapter) SnapshotQuality() int       { return a.cfg.Snapshot.Quality }
 
-func main() {
-	configPath := flag.String("config", "configs/config.yaml", "path to config file")
-	showVersion := flag.Bool("version", false, "print version and exit")
-	flag.Parse()
-
-	if *showVersion {
-		fmt.Fprintf(os.Stderr, "mibee-eye version %s\n", version)
-		os.Exit(0)
-	}
-
-	cfg, err := config.Load(*configPath)
-	if err != nil {
-		log.Fatalf("load config: %v", err)
-	}
-	initLogging(cfg.Logging.Level)
-
-	if cfg.ONVIF.Password == "" {
-		slog.Error("ONVIF password must not be empty. Set onvif.password in config or MIBEE_EYE_ONVIF_PASSWORD env var")
-		os.Exit(1)
-	}
-
-	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
-	defer cancel()
-
-	localIP := netutil.DetectLocalIP()
-	slog.Info("MiBee Eye starting", "version", version, "fallback_ip", localIP)
-	adapter := &configAdapter{cfg: cfg, deviceIP: localIP}
-
-	// --- Step 1: Camera ---
+// buildCameraFromConfig assembles the capture backend for cfg: camera
+// params (config → defaults), CameraInfo, and the mode switch. Extracted
+// so the in-place camera restart (SPEC §5 applied:"camera_restart") can
+// rebuild the pipeline from freshly loaded config with identical logic.
+func buildCameraFromConfig(cfg *config.Config) (camera.Camera, string) {
 	cameraParams := camera.DefaultParams()
 	cameraParams.Width = uint32(cfg.Camera.Width)
 	cameraParams.Height = uint32(cfg.Camera.Height)
@@ -223,9 +175,6 @@ func main() {
 	// GB28181, recordings, /snapshot) sees them, persistently.
 	cameraParams.HFlip = cfg.Camera.HFlip
 	cameraParams.VFlip = cfg.Camera.VFlip
-	// Post-rotation stream resolution (SPEC appendix A #19) — the AI
-	// detection bbox space and every dimension announcement use these.
-	effW, effH := cfg.Camera.EffectiveDims()
 	cameraInfo := camera.CameraInfo{
 		Name:         cfg.Device.Name,
 		Manufacturer: cfg.Device.Manufacturer,
@@ -286,6 +235,79 @@ func main() {
 			camera.WithFrameBufferSize(cfg.Camera.FrameBufferSize),
 		)
 	}
+	return cam, externalRTSPURL
+}
+
+func (a *configAdapter) CameraBitrate() int  { return a.cfg.Camera.Bitrate }
+func (a *configAdapter) CameraWidth() int    { return a.cfg.Camera.Width }
+func (a *configAdapter) CameraHeight() int   { return a.cfg.Camera.Height }
+func (a *configAdapter) CameraFPS() int      { return a.cfg.Camera.FPS }
+func (a *configAdapter) CameraHFlip() bool   { return a.cfg.Camera.HFlip }
+func (a *configAdapter) CameraVFlip() bool   { return a.cfg.Camera.VFlip }
+func (a *configAdapter) CameraRotation() int { return a.cfg.Camera.Rotation }
+func (a *configAdapter) CameraEffectiveWidth() int {
+	w, _ := a.cfg.Camera.EffectiveDims()
+	return w
+}
+func (a *configAdapter) CameraEffectiveHeight() int {
+	_, h := a.cfg.Camera.EffectiveDims()
+	return h
+}
+func (a *configAdapter) DeviceName() string         { return a.cfg.Device.Name }
+func (a *configAdapter) DeviceManufacturer() string { return a.cfg.Device.Manufacturer }
+func (a *configAdapter) DeviceModel() string        { return a.cfg.Device.Model }
+func (a *configAdapter) DeviceFirmware() string     { return a.cfg.Device.Firmware }
+func (a *configAdapter) DeviceHardwareID() string   { return a.cfg.Device.HardwareID }
+func (a *configAdapter) DeviceSerialNumber() string { return a.cfg.Device.SerialNumber }
+func (a *configAdapter) LoggingLevel() string       { return a.cfg.Logging.Level }
+func (a *configAdapter) SnapshotEnabled() bool      { return a.cfg.Snapshot.Enabled }
+func (a *configAdapter) SnapshotQuality() int       { return a.cfg.Snapshot.Quality }
+
+func main() {
+	configPath := flag.String("config", "configs/config.yaml", "path to config file")
+	showVersion := flag.Bool("version", false, "print version and exit")
+	flag.Parse()
+
+	if *showVersion {
+		fmt.Fprintf(os.Stderr, "mibee-eye version %s\n", version)
+		os.Exit(0)
+	}
+
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		log.Fatalf("load config: %v", err)
+	}
+	initLogging(cfg.Logging.Level)
+
+	if cfg.ONVIF.Password == "" {
+		slog.Error("ONVIF password must not be empty. Set onvif.password in config or MIBEE_EYE_ONVIF_PASSWORD env var")
+		os.Exit(1)
+	}
+
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer cancel()
+
+	localIP := netutil.DetectLocalIP()
+	slog.Info("MiBee Eye starting", "version", version, "fallback_ip", localIP)
+	adapter := &configAdapter{cfg: cfg, deviceIP: localIP}
+
+	// --- Step 1: Camera ---
+	built, externalRTSPURL := buildCameraFromConfig(cfg)
+
+	// In-place camera restarts (SPEC §5 applied:"camera_restart"): the
+	// wrapper exposes a stable Frames() channel, so geometry-preserving
+	// config changes swap the source without recycling the process —
+	// GB28181 registration, ONVIF and web sessions all survive.
+	cameraFactory := func(ctx context.Context) (camera.Camera, error) {
+		fresh, err := config.Load(*configPath)
+		if err != nil {
+			return nil, err
+		}
+		c, _ := buildCameraFromConfig(fresh)
+		return c, nil
+	}
+	restr := camera.NewRestartable(ctx, built, cameraFactory)
+	var cam camera.Camera = restr
 
 	if err := cam.Start(ctx); err != nil {
 		slog.Error("camera start", "error", err)
@@ -359,6 +381,9 @@ func main() {
 	// subprocess decodes keyframes, ONNX Runtime runs NanoDet inference.
 	// NewService returns nil when disabled or unavailable.
 	ai.InitRegistry("/var/lib/mibee-eye/models")
+	// Post-rotation stream resolution (SPEC appendix A #19) — the AI
+	// detection bbox space uses the effective dims.
+	effW, effH := cfg.Camera.EffectiveDims()
 	aiService := ai.NewService(ai.Options{
 		Enabled:             cfg.AI.Enabled,
 		Model:               cfg.AI.Model,
@@ -432,11 +457,25 @@ func main() {
 		})
 	}
 
+	// In-place camera restart hook for the web layer (SPEC §5
+	// applied:"camera_restart"): swap the capture source and refresh the
+	// snapshot still-transform to the freshly persisted rotation/flips.
+	restartCamera := func() error {
+		if err := restr.Restart(); err != nil {
+			return err
+		}
+		if fresh, err := config.Load(*configPath); err == nil {
+			snapshotBuffer.SetTransform(fresh.Camera.Rotation, fresh.Camera.HFlip, fresh.Camera.VFlip)
+		}
+		return nil
+	}
+
 	var webServer *web.Server
 	// --- Step 5.5: Web UI Server ---
 	if cfg.Web.Enabled {
 		webServer = web.New(web.Config{
 			Port:              cfg.Web.Port,
+			RestartCamera:     restartCamera,
 			Username:          cfg.Web.Username,
 			Password:          cfg.Web.Password,
 			ConfigPath:        *configPath,

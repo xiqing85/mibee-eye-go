@@ -42,10 +42,14 @@ type Config struct {
 	WriteTimeout      time.Duration         // http.Server.WriteTimeout (0 = streaming endpoints)
 	IdleTimeout       time.Duration         // http.Server.IdleTimeout (0 = default 120s)
 	CameraStatus      func() bool           // returns camera alive status (nil = unavailable)
-	RTSPStatus        func() bool           // returns RTSP server status (nil = unavailable)
-	FrameRate         func() float64        // returns current fps (nil = unavailable)
-	Snapshot          http.Handler          // GET /snapshot handler (nil = disabled)
-	Metrics           http.Handler          // GET /metrics handler (nil = disabled; SPEC §3.2)
+	// RestartCamera rebuilds the camera pipeline in place for
+	// geometry-preserving camera changes (SPEC §5 applied:"camera_restart";
+	// nil = feature unavailable, everything takes the process restart).
+	RestartCamera func() error
+	RTSPStatus    func() bool    // returns RTSP server status (nil = unavailable)
+	FrameRate     func() float64 // returns current fps (nil = unavailable)
+	Snapshot      http.Handler   // GET /snapshot handler (nil = disabled)
+	Metrics       http.Handler   // GET /metrics handler (nil = disabled; SPEC §3.2)
 }
 
 // Server is the web UI HTTP server.
@@ -66,6 +70,9 @@ type Server struct {
 	// Process restart for PUT /api/config and POST /api/system/restart
 	// (SPEC §5.1). Injectable so tests can observe instead of dying.
 	selfRestart func()
+	// In-place camera pipeline restart (SPEC §5 applied:"camera_restart").
+	// Mirrors Config.RestartCamera.
+	restartCamera func() error
 	// Observability state (SPEC §3.2).
 	observe *Observe
 }
@@ -103,6 +110,7 @@ func New(cfg Config) *Server {
 
 	return &Server{
 		cfg:            cfg,
+		restartCamera:  cfg.RestartCamera,
 		observe:        NewObserve(),
 		hub:            newSSEHub(logger),
 		logger:         logger,
