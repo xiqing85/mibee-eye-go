@@ -136,7 +136,7 @@ func OpenM2MEncoder(path string, width, height uint32, opts M2MEncoderOptions) (
 	// buffer-less context. I_PERIOD/GOP keeps keyframes periodic —
 	// without it mid-stream RTSP joins and recording segmentation break.
 	setCtrl := func(id uint32, value int32) {
-		_ = setExtCtrl(file.Fd(), id, int64(value))
+		_ = setExtCtrl(file.Fd(), id, value)
 	}
 	if opts.Bitrate > 0 {
 		setCtrl(cidVideoBitrate, opts.Bitrate)
