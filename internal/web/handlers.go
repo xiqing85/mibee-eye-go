@@ -125,6 +125,17 @@ func (s *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	restoreMaskedSecrets(update, cfg)
+	// Pre-merge camera section, for the in-place-restart eligibility check
+	// below (SPEC §5 applied:"camera_restart").
+	var oldCheck config.Config
+	if err := yaml.Unmarshal(data, &oldCheck); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to parse config: %v", err))
+		return
+	}
+	cameraTouched := false
+	if _, ok := update["camera"].(map[string]interface{}); ok {
+		cameraTouched = true
+	}
 	deepMerge(cfg, update)
 
 	out, err := yaml.Marshal(cfg)
@@ -157,6 +168,22 @@ func (s *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 			s.username = u
 			s.mu.Unlock()
 		}
+	}
+
+	// Geometry-preserving camera change (SPEC §5 applied:"camera_restart"):
+	// rebuild the camera pipeline in place — the process (GB28181
+	// registration, ONVIF, sessions, RTSP server) stays up and the stream
+	// keeps its SPS. Everything else takes the proven process-restart path.
+	if cameraTouched && s.restartCamera != nil && cameraRestartEligible(oldCheck.Camera, check.Camera) {
+		if err := s.restartCamera(); err != nil {
+			s.logger.Printf("web: in-place camera restart failed (%v) — falling back to process restart", err)
+			s.selfRestart()
+			writeOK(w, http.StatusOK, map[string]interface{}{"applied": "restart"})
+			return
+		}
+		s.logger.Printf("web: config applied via in-place camera restart")
+		writeOK(w, http.StatusOK, map[string]interface{}{"applied": "camera_restart"})
+		return
 	}
 
 	s.logger.Printf("web: config updated, restarting in 500ms")
@@ -311,9 +338,23 @@ func (s *Server) handlePostCameraParam(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, fmt.Sprintf("persist flip: %v", err))
 			return
 		}
-		s.logger.Printf("web: camera param %s set to %v, restarting to apply", req.Name, value)
-		s.selfRestart()
-		resp["applied"] = "restart"
+		// Flips never change geometry → always eligible for the in-place
+		// camera restart when the hook is wired (SPEC §5
+		// applied:"camera_restart").
+		if s.restartCamera != nil {
+			if err := s.restartCamera(); err != nil {
+				s.logger.Printf("web: in-place camera restart for %s failed (%v) — falling back to process restart", req.Name, err)
+				s.selfRestart()
+				resp["applied"] = "restart"
+			} else {
+				s.logger.Printf("web: camera param %s set to %v, applied via in-place camera restart", req.Name, value)
+				resp["applied"] = "camera_restart"
+			}
+		} else {
+			s.logger.Printf("web: camera param %s set to %v, restarting to apply", req.Name, value)
+			s.selfRestart()
+			resp["applied"] = "restart"
+		}
 	} else {
 		s.logger.Printf("web: camera param %s set to %v", req.Name, value)
 	}
