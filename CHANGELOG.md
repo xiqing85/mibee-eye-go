@@ -46,6 +46,23 @@ Notable changes to MiBee Eye (Go implementation) are documented here.
   the next frame via transform atomics; ForceIDR (DeviceControl
   IFrameCmd) now works on this path too via the M2M encoder. 0/180 keep
   the zero-CPU rpicam-vid H.264 path.
+- **V4L2 M2M hardware encoder actually works now** (found live while
+  bringing up the rotation pipeline; the hardware path had never run on
+  real silicon — everything fell back to ffmpeg silently): three real
+  bugs fixed. (a) `BufTypeVideoCaptureMplane` was **13** (SDR_CAPTURE)
+  instead of **9** — every CAPTURE-side ioctl was rejected with EINVAL;
+  buffer-type enum values are now pinned by test. (b) MPLANE buffer
+  ioctls need `length` = plane count (QUERYBUF/QBUF/DQBUF) and the
+  consumed OUTPUT buffers must be DQBUF-reclaimed each frame or the pool
+  drains after nbuffers frames; the encoder now polls (POLLIN) before
+  dequeuing on the O_NONBLOCK fd. (c) Codec controls must go through
+  `VIDIOC_S_EXT_CTRLS` — legacy S_CTRL answers ENOTTY on bcm2835 for
+  class controls. Additionally bcm2835 accepts GOP/I_PERIOD controls but
+  ignores them, so keyframe cadence is enforced in software by pressing
+  the (working) FORCE_KEY_FRAME button every iPeriod frames; bitrate and
+  SPS/PPS repeat are set best-effort. Verified live on .118: hardware
+  encode at 720x1280, periodic IDR, RTSP/snapshot/GB healthy, CPU load
+  ~5.1 → ~2.9 vs the ffmpeg fallback.
 - **PUT /api/config validates before persisting** (found live during the
   rotation verification): the deep-merge path wrote the YAML and
   answered 200 without validating — an invalid value (e.g.
