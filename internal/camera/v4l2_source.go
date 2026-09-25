@@ -140,16 +140,23 @@ func NewV4L2Source(opts ...V4L2Option) *V4L2Source {
 		openCapture: func(path string, w, h uint32) (captureDevice, error) {
 			return v4l2.OpenCapture(path, w, h)
 		},
-		openM2M: func(path string, w, h uint32) (frameEncoder, error) {
-			enc, err := v4l2.OpenM2MEncoder(path, w, h)
+		openM2M: nil, // default installed after options below (needs params)
+	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	if s.openM2M == nil {
+		p := s.params
+		s.openM2M = func(path string, w, h uint32) (frameEncoder, error) {
+			enc, err := v4l2.OpenM2MEncoder(path, w, h, v4l2.M2MEncoderOptions{
+				Bitrate: int32(p.Bitrate),
+				IPeriod: int32(p.IDRPeriod),
+			})
 			if err != nil {
 				return nil, err
 			}
 			return &m2mEncoder{enc: enc}, nil
-		},
-	}
-	for _, opt := range opts {
-		opt(s)
+		}
 	}
 	return s
 }

@@ -113,3 +113,22 @@ func TestVidiocSCtrlAndForceKeyFrameCID(t *testing.T) {
 		t.Fatalf("cidForceKeyFrame = %#x", cidForceKeyFrame)
 	}
 }
+
+// Buffer-type enum values are pinned to the 64-bit UABI: the M2M encoder
+// opens CAPTURE_MPLANE after OUTPUT_MPLANE, and a wrong constant there is
+// invisible to struct-size tests — it surfaced live as bcm2835 rejecting
+// every CAPTURE S_FMT with EINVAL (13 is SDR_CAPTURE, not 9).
+func TestBufferTypeEnumValues(t *testing.T) {
+	if BufTypeVideoCapture != 1 {
+		t.Errorf("CAPTURE = %d, want 1", BufTypeVideoCapture)
+	}
+	if BufTypeVideoOutput != 2 {
+		t.Errorf("OUTPUT = %d, want 2", BufTypeVideoOutput)
+	}
+	if BufTypeVideoCaptureMplane != 9 {
+		t.Errorf("CAPTURE_MPLANE = %d, want 9", BufTypeVideoCaptureMplane)
+	}
+	if BufTypeVideoOutputMplane != 10 {
+		t.Errorf("OUTPUT_MPLANE = %d, want 10", BufTypeVideoOutputMplane)
+	}
+}

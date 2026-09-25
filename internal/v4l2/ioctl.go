@@ -31,8 +31,8 @@ func ioc(dir, nr, size uint32) uint32 {
 const (
 	BufTypeVideoCapture       = 1
 	BufTypeVideoOutput        = 2
+	BufTypeVideoCaptureMplane = 9
 	BufTypeVideoOutputMplane  = 10
-	BufTypeVideoCaptureMplane = 13
 
 	MemoryMmap = 1
 
@@ -222,11 +222,68 @@ var (
 	vidiocStreamoff = ioc(_IOCWrite, 19, 4)
 	// struct v4l2_control { u32 id; i32 value } = 8 bytes.
 	vidiocSCtrl = ioc(_IOCWrite, 3, 8)
+	// VIDIOC_S_EXT_CTRLS = _IOWR('V', 72, struct v4l2_ext_controls).
+	vidiocSExtCtrls = ioc(_IOCRead|_IOCWrite, 72, uint32(unsafe.Sizeof(v4l2ExtControls{})))
 )
+
+// M2MEncoderOptions tunes the best-effort M2M encoder controls. Zero
+// values keep the driver default. Lives in this build-tag-free file so
+// the 32-bit stub can carry the same signature.
+type M2MEncoderOptions struct {
+	Bitrate int32 // V4L2_CID_MPEG_VIDEO_BITRATE (bps)
+	// IPeriod sets the keyframe cadence: the driver's I_PERIOD/GOP where
+	// honored, plus a software FORCE_KEY_FRAME cadence on drivers that
+	// accept the control but ignore it (bcm2835 does — verified live).
+	IPeriod int32
+	// RepeatSeqHeader re-emits SPS/PPS with every IDR (RTSP joinability);
+	// auto-enabled when IPeriod is set.
+	RepeatSeqHeader bool
+}
+
+// v4l2ExtControl mirrors struct v4l2_ext_control (24 bytes, 64-bit ABI):
+// the value union carries int32/int64 payloads; pointer members are not
+// used by the codec controls.
+type v4l2ExtControl struct {
+	ID         uint32
+	Size       uint32
+	Reserved2  uint32
+	_          uint32
+	ValueUnion int64
+}
+
+// v4l2ExtControls mirrors struct v4l2_ext_controls (32 bytes).
+type v4l2ExtControls struct {
+	Which     uint32 // V4L2_CTRL_WHICH_CUR_VAL (0)
+	Count     uint32
+	ErrorIdx  uint32
+	RequestFD int32
+	Reserved  uint32
+	_         uint32
+	Controls  *v4l2ExtControl
+}
+
+// setExtCtrl issues VIDIOC_S_EXT_CTRLS for one int-valued control. Codec
+// controls live in a control class — many drivers (bcm2835 included) only
+// implement the extended ioctl and answer legacy S_CTRL with ENOTTY.
+func setExtCtrl(fd uintptr, id uint32, value int64) error {
+	one := v4l2ExtControl{ID: id, ValueUnion: value}
+	many := v4l2ExtControls{Count: 1, Controls: &one}
+	return ioctl(fd, vidiocSExtCtrls, unsafe.Pointer(&many))
+}
 
 // V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME (v4l2-controls.h:
 // V4L2_CID_CODEC_BASE+229 — the 64-bit UABI value, pinned by test).
 const cidForceKeyFrame = 0x9909E5
+
+// Best-effort encoder controls (v4l2-controls.h, V4L2_CID_CODEC_BASE =
+// 0x990900). Drivers reject unsupported ones — every set is non-fatal,
+// mirroring the Rust twin's encoder setup.
+const (
+	cidVideoBitrate         = 0x990900 + 207 // V4L2_CID_MPEG_VIDEO_BITRATE
+	cidVideoRepeatSeqHeader = 0x990900 + 226 // V4L2_CID_MPEG_VIDEO_REPEAT_SEQ_HEADER
+	cidVideoGopSize         = 0x990900 + 203 // V4L2_CID_MPEG_VIDEO_GOP_SIZE
+	cidVideoH264IPeriod     = 0x990900 + 358 // V4L2_CID_MPEG_VIDEO_H264_I_PERIOD
+)
 
 func ioctl(fd uintptr, req uint32, arg unsafe.Pointer) error {
 	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, fd, uintptr(req), uintptr(arg))

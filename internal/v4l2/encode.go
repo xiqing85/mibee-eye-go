@@ -8,6 +8,8 @@ import (
 	"os"
 	"syscall"
 	"unsafe"
+
+	"golang.org/x/sys/unix"
 )
 
 // M2MEncoder drives a V4L2 M2M H.264 encoder node (MPLANE) — e.g.
@@ -21,23 +23,34 @@ type M2MEncoder struct {
 	outputBufs [][]byte
 	capBufs    [][]byte
 	nextOut    uint32
+	// Software IDR cadence: some drivers accept the GOP/I_PERIOD controls
+	// but ignore them (bcm2835 does — verified empirically), so the
+	// FORCE_KEY_FRAME button is pressed every iPeriod frames instead.
+	iPeriod    uint32
+	frameCount uint64
 	closed     bool
 }
 
 const annexbStartCode = "\x00\x00\x00\x01"
 
 // OpenM2MEncoder opens `path` and configures an H.264 encoder for
-// YUV420 input at w×h. Profile/bitrate follow the driver defaults;
-// codecs like bcm2835 start at a sane default and can be tuned through
-// extended controls, which is deliberately out of scope for v1.
-func OpenM2MEncoder(path string, width, height uint32) (*M2MEncoder, error) {
+// YUV420 input at w×h with the given best-effort controls. Unsupported
+// controls are skipped silently — drivers differ (bcm2835 supports
+// I_PERIOD + REPEAT_SEQ_HEADER + BITRATE but not FORCE_KEY_FRAME).
+func OpenM2MEncoder(path string, width, height uint32, opts M2MEncoderOptions) (*M2MEncoder, error) {
 	file, err := openDevice(path)
 	if err != nil {
 		return nil, fmt.Errorf("v4l2: open encoder %s: %w", path, err)
 	}
+	// width/height are finalized after OUTPUT S_FMT negotiation below.
 	e := &M2MEncoder{file: file, width: width, height: height}
 
 	// OUTPUT (raw YUV in), MPLANE, 1 plane holding the full frame.
+	// The driver may adjust width/height/stride on S_FMT — the struct is
+	// updated in place, and the CAPTURE side below must use the
+	// negotiated values (bcm2835-codec rejects a CAPTURE S_FMT without
+	// them; sequence proven against the same driver family by the Rust
+	// twin's shiguredo_v4l2 encoder).
 	var outFmt V4l2Format
 	outFmt.Type = BufTypeVideoOutputMplane
 	mp := outFmt.Mplane()
@@ -51,17 +64,46 @@ func OpenM2MEncoder(path string, width, height uint32) (*M2MEncoder, error) {
 		file.Close()
 		return nil, fmt.Errorf("v4l2: S_FMT encoder output: %w", err)
 	}
+	negotiatedW := mp.Width
+	negotiatedH := mp.Height
+	e.width, e.height = negotiatedW, negotiatedH
 
-	// CAPTURE (H.264 out), MPLANE, 1 plane, driver-chosen size.
+	// CAPTURE (H.264 out), MPLANE, 1 plane. Width/height mirror the
+	// negotiated OUTPUT geometry and sizeimage gives the driver a buffer
+	// hint (the driver may still grow it) — both are required by
+	// bcm2835-codec.
 	var capFmt V4l2Format
 	capFmt.Type = BufTypeVideoCaptureMplane
 	cp := capFmt.Mplane()
+	cp.Width = negotiatedW
+	cp.Height = negotiatedH
 	cp.PixelFormat = FourccH264
 	cp.Field = FieldNone
 	cp.NumPlanes = 1
+	cp.PlaneFmt[0].SizeImage = 512 * 1024
 	if err := ioctl(file.Fd(), vidiocSFmt, unsafe.Pointer(&capFmt)); err != nil {
 		file.Close()
 		return nil, fmt.Errorf("v4l2: S_FMT encoder capture: %w", err)
+	}
+
+	// Best-effort control set (drivers reject what they lack; the Rust
+	// twin does the same). Must happen BEFORE REQBUFS/STREAMON — several
+	// drivers (bcm2835 included) take codec controls only on a fresh,
+	// buffer-less context. I_PERIOD/GOP keeps keyframes periodic —
+	// without it mid-stream RTSP joins and recording segmentation break.
+	setCtrl := func(id uint32, value int32) {
+		_ = setExtCtrl(file.Fd(), id, int64(value))
+	}
+	if opts.Bitrate > 0 {
+		setCtrl(cidVideoBitrate, opts.Bitrate)
+	}
+	if opts.IPeriod > 0 {
+		e.iPeriod = uint32(opts.IPeriod)
+		setCtrl(cidVideoH264IPeriod, opts.IPeriod)
+		setCtrl(cidVideoGopSize, opts.IPeriod)
+		setCtrl(cidVideoRepeatSeqHeader, 1)
+	} else if opts.RepeatSeqHeader {
+		setCtrl(cidVideoRepeatSeqHeader, 1)
 	}
 
 	var errOut, errCap error
@@ -74,6 +116,15 @@ func OpenM2MEncoder(path string, width, height uint32) (*M2MEncoder, error) {
 	if errCap != nil {
 		e.Close()
 		return nil, errCap
+	}
+	// Queue CAPTURE buffers up front (OUTPUT buffers are queued per-frame
+	// in Encode). Must run after both slices are assigned — queueBuffer
+	// derives the plane length from them.
+	for i := range e.capBufs {
+		if err := e.queueBuffer(BufTypeVideoCaptureMplane, uint32(i), 0); err != nil {
+			e.Close()
+			return nil, err
+		}
 	}
 
 	onOut := int32(BufTypeVideoOutputMplane)
@@ -100,6 +151,7 @@ func (e *M2MEncoder) setupQueue(bufType uint32, count uint32) ([][]byte, error) 
 		buf.Index = i
 		buf.Type = bufType
 		buf.Memory = MemoryMmap
+		buf.Length = 1 // plane count — required by the MPLANE buffer ioctls
 		var planes [1]V4l2Plane
 		buf.SetPlanesPtr(&planes[0])
 		if err := ioctl(e.file.Fd(), vidiocQuerybuf, unsafe.Pointer(&buf)); err != nil {
@@ -110,13 +162,6 @@ func (e *M2MEncoder) setupQueue(bufType uint32, count uint32) ([][]byte, error) 
 			return nil, fmt.Errorf("v4l2: encoder mmap %d: %w", i, err)
 		}
 		bufs = append(bufs, mapped)
-		// Queue CAPTURE buffers immediately; OUTPUT buffers are queued
-		// per-frame in Encode.
-		if bufType == BufTypeVideoCaptureMplane {
-			if err := e.queueBuffer(bufType, i, 0); err != nil {
-				return nil, err
-			}
-		}
 	}
 	return bufs, nil
 }
@@ -128,6 +173,7 @@ func (e *M2MEncoder) queueBuffer(bufType uint32, index uint32, bytesUsed uint32)
 	buf.Memory = MemoryMmap
 	buf.BytesUsed = bytesUsed
 	buf.Field = FieldNone
+	buf.Length = 1 // plane count — required by the MPLANE buffer ioctls
 	var planes [1]V4l2Plane
 	planes[0].BytesUsed = bytesUsed
 	planes[0].Length = uint32(len(e.bufferFor(bufType, index)))
@@ -156,6 +202,14 @@ func (e *M2MEncoder) Encode(yuv []byte) ([]byte, error) {
 		return nil, fmt.Errorf("v4l2: short frame: got %d bytes, need %d", len(yuv), want)
 	}
 
+	// Press FORCE_KEY_FRAME every iPeriod frames (button control —
+	// execute-on-write; the next encoded frame becomes an IDR). Frame 0
+	// is an IDR naturally.
+	if e.iPeriod > 0 && e.frameCount > 0 && e.frameCount%uint64(e.iPeriod) == 0 {
+		_ = setExtCtrl(e.file.Fd(), cidForceKeyFrame, 1)
+	}
+	e.frameCount++
+
 	out := e.outputBufs[e.nextOut%uint32(len(e.outputBufs))]
 	copy(out, yuv[:want])
 	if err := e.queueBuffer(BufTypeVideoOutputMplane, e.nextOut%uint32(len(e.outputBufs)), want); err != nil {
@@ -166,8 +220,32 @@ func (e *M2MEncoder) Encode(yuv []byte) ([]byte, error) {
 	var buf V4l2Buffer
 	buf.Type = BufTypeVideoCaptureMplane
 	buf.Memory = MemoryMmap
+	buf.Length = 1 // plane count — required by the MPLANE buffer ioctls
 	var planes [1]V4l2Plane
 	buf.SetPlanesPtr(&planes[0])
+	// M2M completion dance: the fd is O_NONBLOCK. Wait on POLLIN — the
+	// CAPTURE (encoded) side completing means the OUTPUT (raw input)
+	// buffer was consumed too; reclaim it or the pool drains and the
+	// next QBUF fails with EINVAL after nbuffers frames. (POLLOUT only
+	// means "queue not full" on an M2M fd — it is permanently ready
+	// here and must not be treated as a completion signal.)
+	fds := []unix.PollFd{{Fd: int32(e.file.Fd()), Events: unix.POLLIN}}
+	if n, err := unix.Poll(fds, 1000); err != nil {
+		return nil, fmt.Errorf("v4l2: encoder poll: %w", err)
+	} else if n == 0 {
+		return nil, fmt.Errorf("v4l2: encoder poll timeout (1000ms)")
+	}
+	// Reclaim the consumed input buffer (matches the frame we queued;
+	// the encoder completes the OUTPUT side no later than its CAPTURE).
+	var ob V4l2Buffer
+	ob.Type = BufTypeVideoOutputMplane
+	ob.Memory = MemoryMmap
+	ob.Length = 1
+	var oplanes [1]V4l2Plane
+	ob.SetPlanesPtr(&oplanes[0])
+	if err := ioctl(e.file.Fd(), vidiocDQBuf, unsafe.Pointer(&ob)); err != nil {
+		return nil, fmt.Errorf("v4l2: encoder DQBUF(output): %w", err)
+	}
 	if err := ioctl(e.file.Fd(), vidiocDQBuf, unsafe.Pointer(&buf)); err != nil {
 		return nil, fmt.Errorf("v4l2: encoder DQBUF: %w", err)
 	}
@@ -193,8 +271,7 @@ func (e *M2MEncoder) Encode(yuv []byte) ([]byte, error) {
 // without the control return an error — callers decide whether that is
 // fatal.
 func (e *M2MEncoder) RequestKeyframe() error {
-	ctrl := v4l2Control{id: cidForceKeyFrame, value: 1}
-	if err := ioctl(e.file.Fd(), vidiocSCtrl, unsafe.Pointer(&ctrl)); err != nil {
+	if err := setExtCtrl(e.file.Fd(), cidForceKeyFrame, 1); err != nil {
 		return fmt.Errorf("v4l2: FORCE_KEY_FRAME: %w", err)
 	}
 	return nil

@@ -225,7 +225,10 @@ func (c *RPiCamVidCamera) resolveYuvEncoder() error {
 	}
 	if c.openM2M == nil {
 		c.openM2M = func(path string, w, h uint32) (frameEncoder, error) {
-			enc, err := v4l2.OpenM2MEncoder(path, w, h)
+			enc, err := v4l2.OpenM2MEncoder(path, w, h, v4l2.M2MEncoderOptions{
+				Bitrate: int32(c.params.Bitrate),
+				IPeriod: int32(c.params.IDRPeriod),
+			})
 			if err != nil {
 				return nil, err
 			}
