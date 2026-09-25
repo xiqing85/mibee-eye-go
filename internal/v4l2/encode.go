@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
@@ -20,6 +21,7 @@ type M2MEncoder struct {
 	file       *os.File
 	width      uint32
 	height     uint32
+	stride     uint32
 	outputBufs [][]byte
 	capBufs    [][]byte
 	nextOut    uint32
@@ -29,6 +31,40 @@ type M2MEncoder struct {
 	iPeriod    uint32
 	frameCount uint64
 	closed     bool
+}
+
+// copyPaddedI420 writes a contiguous I420 frame (w×h, stride w) into dst
+// using the driver-negotiated luma stride. Drivers may pad the OUTPUT
+// stride regardless of what was requested (bcm2835: ALIGN(width, 64)), and
+// the padded sizeimage is stride*h*3/2 with chroma stride stride/2.
+// Returns the bytes written, or 0 if dst cannot hold the padded frame.
+func copyPaddedI420(dst, src []byte, w, h, stride uint32) int {
+	if stride == w {
+		if len(dst) < len(src) {
+			return 0
+		}
+		copy(dst, src)
+		return len(src)
+	}
+	cstride := stride / 2
+	uOff := stride * h
+	vOff := uOff + cstride*(h/2)
+	total := vOff + cstride*(h/2)
+	if uint32(len(dst)) < total || uint32(len(src)) < w*h*3/2 {
+		return 0
+	}
+	for row := uint32(0); row < h; row++ {
+		copy(dst[row*stride:row*stride+w], src[row*w:row*w+w])
+	}
+	srcU := w * h
+	for row := uint32(0); row < h/2; row++ {
+		copy(dst[uOff+row*cstride:uOff+row*cstride+w/2], src[srcU+row*(w/2):srcU+row*(w/2)+w/2])
+	}
+	srcV := srcU + (w/2)*(h/2)
+	for row := uint32(0); row < h/2; row++ {
+		copy(dst[vOff+row*cstride:vOff+row*cstride+w/2], src[srcV+row*(w/2):srcV+row*(w/2)+w/2])
+	}
+	return int(total)
 }
 
 const annexbStartCode = "\x00\x00\x00\x01"
@@ -67,6 +103,14 @@ func OpenM2MEncoder(path string, width, height uint32, opts M2MEncoderOptions) (
 	negotiatedW := mp.Width
 	negotiatedH := mp.Height
 	e.width, e.height = negotiatedW, negotiatedH
+	// Honor the negotiated luma stride: bcm2835 pads it to ALIGN(width,64)
+	// whatever we request, and reading a contiguous frame at a padded
+	// stride garbles every row (only visible for widths not 64-aligned —
+	// i.e. the 90°/270° rotation cases).
+	e.stride = uint32(mp.PlaneFmt[0].BytesPerLine)
+	if e.stride < negotiatedW {
+		e.stride = negotiatedW
+	}
 
 	// CAPTURE (H.264 out), MPLANE, 1 plane. Width/height mirror the
 	// negotiated OUTPUT geometry and sizeimage gives the driver a buffer
@@ -211,8 +255,11 @@ func (e *M2MEncoder) Encode(yuv []byte) ([]byte, error) {
 	e.frameCount++
 
 	out := e.outputBufs[e.nextOut%uint32(len(e.outputBufs))]
-	copy(out, yuv[:want])
-	if err := e.queueBuffer(BufTypeVideoOutputMplane, e.nextOut%uint32(len(e.outputBufs)), want); err != nil {
+	written := copyPaddedI420(out, yuv[:want], e.width, e.height, e.stride)
+	if written == 0 {
+		return nil, fmt.Errorf("v4l2: encoder output buffer too small for padded stride %d (w=%d h=%d)", e.stride, e.width, e.height)
+	}
+	if err := e.queueBuffer(BufTypeVideoOutputMplane, e.nextOut%uint32(len(e.outputBufs)), uint32(written)); err != nil {
 		return nil, err
 	}
 	e.nextOut++
@@ -230,10 +277,26 @@ func (e *M2MEncoder) Encode(yuv []byte) ([]byte, error) {
 	// means "queue not full" on an M2M fd — it is permanently ready
 	// here and must not be treated as a completion signal.)
 	fds := []unix.PollFd{{Fd: int32(e.file.Fd()), Events: unix.POLLIN}}
-	if n, err := unix.Poll(fds, 1000); err != nil {
-		return nil, fmt.Errorf("v4l2: encoder poll: %w", err)
-	} else if n == 0 {
-		return nil, fmt.Errorf("v4l2: encoder poll timeout (1000ms)")
+	// Retry on EINTR — signals (subprocess reaping on this device's
+	// pipeline, GB28181 timers) abort poll mid-wait; a stray EINTR once
+	// killed the whole rotation pipeline in the field.
+	deadline := time.Now().Add(1000 * time.Millisecond)
+	for {
+		timeout := int(time.Until(deadline).Milliseconds())
+		if timeout < 0 {
+			timeout = 0
+		}
+		n, err := unix.Poll(fds, timeout)
+		if err == unix.EINTR {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("v4l2: encoder poll: %w", err)
+		}
+		if n == 0 {
+			return nil, fmt.Errorf("v4l2: encoder poll timeout (1000ms)")
+		}
+		break
 	}
 	// Reclaim the consumed input buffer (matches the frame we queued;
 	// the encoder completes the OUTPUT side no later than its CAPTURE).
