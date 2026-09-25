@@ -37,7 +37,9 @@ camera:
   # Device-level rotation baked into the stream (SPEC appendix A #19):
   # 0 | 90 | 180 | 270 (degrees clockwise); 90/270 swap the effective
   # stream resolution. v4l2 mode: full range (in-process transpose).
-  # rpicamvid mode: 0/180 only — Pi libcamera has no transpose support.
+  # rpicamvid mode: full range too — 0/180 via libcamera flips, 90/270 via
+  # a raw-YUV subprocess + in-process transpose + hardware M2M encode
+  # (Pi libcamera has no transpose support; the pipeline routes around).
   rotation: 0
 
   # Target bitrate in bits per second (2 Mbps)

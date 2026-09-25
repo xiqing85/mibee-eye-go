@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"sync"
 	"testing"
 	"time"
 
@@ -96,20 +97,34 @@ func (c *oneShotCapture) ReadFrame() ([]byte, error) {
 }
 func (c *oneShotCapture) Close() { c.closed = true }
 
-// captureEncoder records every frame it is asked to encode.
+// captureEncoder records every frame it is asked to encode. The frame
+// log is mutex-guarded: the pump goroutine writes it while tests poll.
 type captureEncoder struct {
 	name   string
+	mu     sync.Mutex
 	frames [][]byte
 }
 
 func (f *captureEncoder) Encode(yuv []byte, pts uint64) error {
 	cp := make([]byte, len(yuv))
 	copy(cp, yuv)
+	f.mu.Lock()
 	f.frames = append(f.frames, cp)
+	f.mu.Unlock()
 	return nil
+}
+
+// recordedFrames returns a copy of the frame log (race-safe polling).
+func (f *captureEncoder) recordedFrames() [][]byte {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([][]byte(nil), f.frames...)
 }
 func (f *captureEncoder) Close() error { return nil }
 func (f *captureEncoder) Name() string { return f.name }
+
+// RequestKeyframe marks the encoder as IDR-capable (ForceIDR wiring tests).
+func (f *captureEncoder) RequestKeyframe() error { return nil }
 
 // pumpOneFrame drives the pump over a single prepared YU12 frame and
 // returns what the encoder received.
@@ -140,14 +155,16 @@ func pumpOneFrame(t *testing.T, opts ...V4L2Option) []byte {
 	}
 	defer src.Stop()
 	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) && len(enc.frames) == 0 {
+	var frames [][]byte
+	for time.Now().Before(deadline) && len(frames) == 0 {
 		time.Sleep(5 * time.Millisecond)
+		frames = enc.recordedFrames()
 	}
-	if len(enc.frames) == 0 {
+	if len(frames) == 0 {
 		t.Fatal("pump never delivered a frame to the encoder")
 	}
 	t.Logf("m2m opened at %dx%d", m2mW, m2mH)
-	return enc.frames[0]
+	return frames[0]
 }
 
 func TestV4L2PumpBakesRotation90(t *testing.T) {

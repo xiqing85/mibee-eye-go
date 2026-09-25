@@ -256,8 +256,12 @@ func main() {
 			camera.WithVidParams(cameraParams),
 			camera.WithVidInfo(cameraInfo),
 			camera.WithVidFrameBufferSize(cfg.Camera.FrameBufferSize),
-			// Baked by rpicam-vid's libcamera transform (SPEC appendix A #19).
+			// Rotation (SPEC appendix A #19): 0/180 bake via libcamera
+			// flips; 90/270 switch the subprocess to raw YUV420 and
+			// transpose in-process (M2M hardware encode, ffmpeg fallback).
 			camera.WithVidRotation(cfg.Camera.Rotation),
+			camera.WithVidEncoderDevice(cfg.Camera.EncoderDevice),
+			camera.WithVidFFmpegBin(cfg.Camera.FFmpegBin),
 		)
 	case "v4l2":
 		// Generic V4L2 backend (any board): pure-Go MMAP capture from
