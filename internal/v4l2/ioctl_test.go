@@ -29,6 +29,30 @@ func TestStructSizes(t *testing.T) {
 	if got := unsafe.Sizeof(V4l2PixFormat{}); got != 48 {
 		t.Errorf("V4l2PixFormat size = %d, want 48", got)
 	}
+	if got := unsafe.Sizeof(v4l2ExtControl{}); got != 20 {
+		t.Errorf("v4l2ExtControl size = %d, want 20 (packed UABI)", got)
+	}
+	if got := unsafe.Sizeof(v4l2ExtControls{}); got != 32 {
+		t.Errorf("v4l2ExtControls size = %d, want 32", got)
+	}
+}
+
+// v4l2_ext_control's value union is __attribute__((packed)) — on the 64-bit
+// UABI it sits at offset 12, NOT natural int64 alignment (16). Writing the
+// value at the wrong offset makes the driver read the alignment padding
+// (zero): bitrate gets clamped to the driver minimum and GOP/I_PERIOD/
+// REPEAT_SEQ_HEADER all silently no-op while FORCE_KEY_FRAME (a button —
+// value ignored) keeps working, masking the breakage (found live on
+// bcm2835: 0.12 Mbps streams at a 2 Mbps config).
+func TestV4l2ExtControlValueOffset(t *testing.T) {
+	var c v4l2ExtControl
+	if got := unsafe.Offsetof(c.Value); got != 12 {
+		t.Errorf("v4l2ExtControl.Value offset = %d, want 12 (packed union)", got)
+	}
+	var cs v4l2ExtControls
+	if got := unsafe.Offsetof(cs.Controls); got != 24 {
+		t.Errorf("v4l2ExtControls.Controls offset = %d, want 24", got)
+	}
 }
 
 // Field offsets that matter for unions shared between views.
