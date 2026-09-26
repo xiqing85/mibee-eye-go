@@ -127,6 +127,7 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 		"devices":           false,
 		"mjpeg":             false, // Go dialect A4: H.264 pipeline has no raw frames
 		"mse":               s.cfg.AUHub != nil,
+		"substream":         s.cfg.SubAUHub != nil,
 		"webrtc":            false,
 		"events":            events,
 		"config_apply": map[string]interface{}{

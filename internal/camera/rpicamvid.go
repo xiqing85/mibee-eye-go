@@ -66,6 +66,11 @@ type RPiCamVidCamera struct {
 	frameBufferSize int
 	maxBackoff      time.Duration
 
+	// Substream tap (SPEC appendix A #20): called with each post-transform
+	// I420 frame in yuvMode. Owned by main (boot-static pipeline); nil on
+	// the H.264 direct path, which has no in-process frames to downscale.
+	subTap func(frame []byte, w, h uint32)
+
 	// Rotation pipeline (yuvMode = rotation 90/270): encoder plumbing for
 	// the Go-side transform path, mirroring V4L2Source.
 	yuvMode       bool
@@ -115,6 +120,14 @@ func WithVidEncoderDevice(path string) RPiCamVidOption {
 // rotation pipeline (used when no M2M node probes capable).
 func WithVidFFmpegBin(bin string) RPiCamVidOption {
 	return func(c *RPiCamVidCamera) { c.ffmpegBin = bin }
+}
+
+// WithVidSubstream installs the substream tap (SPEC appendix A #20).
+// Only the 90°/270° raw-YUV pipeline can feed it — the H.264 direct path
+// has no in-process frames; setting a tap there is an error logged at
+// Start.
+func WithVidSubstream(tap func(frame []byte, w, h uint32)) RPiCamVidOption {
+	return func(c *RPiCamVidCamera) { c.subTap = tap }
 }
 
 // WithVidFrameBufferSize sets the frame channel buffer capacity.
@@ -197,6 +210,11 @@ func (c *RPiCamVidCamera) Start(ctx context.Context) error {
 	// front — failing loud here is far better than a subprocess loop
 	// that can never produce frames.
 	c.yuvMode = c.rotation == 90 || c.rotation == 270
+	if c.subTap != nil && !c.yuvMode {
+		slog.Warn("camera: substream requested but the rpicam-vid H.264 direct path " +
+			"(rotation 0/180) has no in-process frames — substream disabled")
+		c.subTap = nil
+	}
 	if c.yuvMode {
 		if err := c.resolveYuvEncoder(); err != nil {
 			c.started = false
@@ -530,6 +548,11 @@ func (c *RPiCamVidCamera) readLoopYUV() {
 				c.yuvScratch = make([]byte, fw)
 			}
 			FlipYU12(frame, fw, fh, hf, vf, c.yuvScratch)
+		}
+		// Substream tap (SPEC appendix A #20): post-transform frame, before
+		// the main encode. Non-blocking; a slow sub pipeline drops frames.
+		if c.subTap != nil {
+			c.subTap(frame, uint32(fw), uint32(fh))
 		}
 		pts := uint64(time.Since(start).Milliseconds()) * 90
 		if err := c.yuvEncoder.Encode(frame, pts); err != nil {

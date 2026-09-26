@@ -51,7 +51,7 @@ func newTestServer(t *testing.T) *httptest.Server {
 	cfg.Device.HardwareID = "IMX219"
 
 	pm := camera.NewParamManager(newMockCamera())
-	srv, err := New(cfg, testAdvertiseIP, pm, onvif.NewSnapshotBuffer(true, "rpicam-still", "ffmpeg"))
+	srv, err := New(cfg, testAdvertiseIP, pm, onvif.NewSnapshotBuffer(true, "rpicam-still", "ffmpeg"), nil)
 	if err != nil {
 		t.Fatalf("onvifgo.New: %v", err)
 	}
@@ -83,7 +83,7 @@ func newTestServerWithSrv(t *testing.T) (*httptest.Server, *Server) {
 	cfg.Device.HardwareID = "IMX219"
 
 	pm := camera.NewParamManager(newMockCamera())
-	srv, err := New(cfg, testAdvertiseIP, pm, onvif.NewSnapshotBuffer(true, "rpicam-still", "ffmpeg"))
+	srv, err := New(cfg, testAdvertiseIP, pm, onvif.NewSnapshotBuffer(true, "rpicam-still", "ffmpeg"), nil)
 	if err != nil {
 		t.Fatalf("onvifgo.New: %v", err)
 	}
@@ -677,5 +677,78 @@ func xmlText(t *testing.T, body, local string) string {
 		case xml.EndElement:
 			depth--
 		}
+	}
+}
+
+// TestSubstreamProfileAndStreamUri (SPEC appendix A #20): with a live
+// substream pipeline the `sub` profile is advertised after `main`, and
+// GetStreamUri routes the sub token to the RTSP /sub mount.
+func TestSubstreamProfileAndStreamUri(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.ONVIF.Port = testONVIFPort
+	cfg.ONVIF.Username = "admin"
+	cfg.ONVIF.Password = testPassword
+	cfg.RTSP.Port = testRTSPPort
+	cfg.Camera.Width = 1280
+	cfg.Camera.Height = 720
+	cfg.Camera.FPS = 25
+	cfg.Camera.Bitrate = 2000000
+
+	pm := camera.NewParamManager(newMockCamera())
+	sub := &camera.SubstreamInfo{Width: 640, Height: 360, FPS: 15, Bitrate: 400000}
+	srv, err := New(cfg, testAdvertiseIP, pm, onvif.NewSnapshotBuffer(true, "rpicam-still", "ffmpeg"), sub)
+	if err != nil {
+		t.Fatalf("onvifgo.New: %v", err)
+	}
+	ts := httptest.NewServer(srv.mux)
+	t.Cleanup(ts.Close)
+
+	profilesReq := `<?xml version="1.0" encoding="UTF-8"?>
+<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">
+<s:Body>
+<GetProfiles xmlns="http://www.onvif.org/ver10/media/wsdl"/>
+</s:Body>
+</s:Envelope>`
+	status, body := postSOAP(t, ts, "/onvif/media_service", profilesReq)
+	if status != http.StatusOK {
+		t.Fatalf("GetProfiles status = %d", status)
+	}
+	mainAt := strings.Index(body, `token="main"`)
+	subAt := strings.Index(body, `token="sub"`)
+	if mainAt < 0 || subAt < 0 {
+		t.Fatalf("both profiles must be advertised:\n%s", body)
+	}
+	if mainAt > subAt {
+		t.Fatalf("main profile must come first (NVR auto-selects #1):\n%s", body)
+	}
+	if !strings.Contains(body, "<Width>640</Width>") && !strings.Contains(body, ":Width>640<") {
+		t.Fatalf("sub geometry missing:\n%s", body)
+	}
+
+	uriReq := `<?xml version="1.0" encoding="UTF-8"?>
+<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">
+<s:Body>
+<GetStreamUri xmlns="http://www.onvif.org/ver10/media/wsdl">
+<ProfileToken>sub</ProfileToken>
+</GetStreamUri>
+</s:Body>
+</s:Envelope>`
+	status, body = postSOAP(t, ts, "/onvif/media_service", uriReq)
+	if status != http.StatusOK {
+		t.Fatalf("GetStreamUri status = %d", status)
+	}
+	if !strings.Contains(body, "/sub") {
+		t.Fatalf("sub token must map to the /sub mount:\n%s", body)
+	}
+	if !strings.Contains(body, fmt.Sprintf(":%d", testRTSPPort)) {
+		t.Fatalf("stream URI must carry the RTSP port:\n%s", body)
+	}
+
+	// The main token keeps the primary mount (fail-open for everything
+	// else is covered by the library's contract tests).
+	uriReqMain := strings.Replace(uriReq, "<ProfileToken>sub</ProfileToken>", "<ProfileToken>main</ProfileToken>", 1)
+	_, body = postSOAP(t, ts, "/onvif/media_service", uriReqMain)
+	if !strings.Contains(body, "/stream") {
+		t.Fatalf("main token must keep the /stream mount:\n%s", body)
 	}
 }

@@ -52,6 +52,11 @@ type V4L2Source struct {
 	stopCh  chan struct{}
 	wg      sync.WaitGroup
 
+	// Substream tap (SPEC appendix A #20): called with each post-transform
+	// I420 frame in pump(). Owned by main (boot-static pipeline); nil
+	// disables it.
+	subTap func(frame []byte, w, h uint32)
+
 	// Device-level transform state (SPEC appendix A #9/#19), applied to
 	// every frame in pump() before encoding — baked into the stream for
 	// every consumer. Rotation is boot-static; flips read per frame so
@@ -111,6 +116,11 @@ func WithV4L2FFmpegBin(bin string) V4L2Option {
 // before encoding. 90/270 swap the encoder-side dimensions.
 func WithV4L2Rotation(degrees int) V4L2Option {
 	return func(s *V4L2Source) { s.rotation = NormalizeRotation(degrees) }
+}
+
+// WithV4L2Substream installs the substream tap (SPEC appendix A #20).
+func WithV4L2Substream(tap func(frame []byte, w, h uint32)) V4L2Option {
+	return func(s *V4L2Source) { s.subTap = tap }
 }
 
 // WithV4L2Probe overrides the encoder-node probe (tests).
@@ -340,6 +350,11 @@ func (s *V4L2Source) pump() {
 				s.txScratch = make([]byte, fw)
 			}
 			FlipYU12(yuv, fw, fh, hf, vf, s.txScratch)
+		}
+		// Substream tap (SPEC appendix A #20): post-transform frame, before
+		// the main encode. Non-blocking; a slow sub pipeline drops frames.
+		if s.subTap != nil {
+			s.subTap(yuv, uint32(fw), uint32(fh))
 		}
 		count++
 		pts := uint64(time.Since(start).Milliseconds()) * 90

@@ -97,6 +97,7 @@ Linux 预编译产物（amd64 / arm64 / armv7）见
 - `camera.bitrate` - 视频码率（比特/秒）
 - `camera.idr_period` - 关键帧间隔；同时约束 AI 检测节奏
 - `camera.hflip` / `camera.vflip` - 翻转烧录进流（经统一重启生效）
+- `camera.substream.*` - 低分辨率省流子码流（默认关闭：640x360、400 kbps、`fps: 0` 跟随主帧率）。对已烘焙旋转/翻转的主采集帧降采样后经第二路编码会话输出：RTSP `/sub` 挂载、ONVIF `sub` Profile（GetStreamUri 按 ProfileToken 路由）、Web `/api/cameras/0/stream.sub.mse` 与 `capabilities.substream`。录像、GB28181 与 AI 仍走主码流。仅原始像素路径可供给——`v4l2` 模式与 rotation 90/270 的 `rpicamvid`；其它情形告警并禁用。重启生效
 - `camera.rotation` - 90° 步进旋转（0/90/180/270，顺时针）烧录进流；90/270 互换对外宣告的分辨率。rpicamvid：0/180 走 libcamera 翻转、90/270 走裸 YUV 子进程 + 进程内转置 + M2M 硬编（树莓派 libcamera 无 transpose 支持，管线绕开）；v4l2：进程内转置；其余模式拒绝非 0 值
 - `rtsp.port` - RTSP 流媒体端口（默认 8554）
 - `onvif.port` - ONVIF HTTP/SOAP 端口（默认 8080）
