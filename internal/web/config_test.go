@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/xiqing85/mibee-eye-go/internal/config"
 	"gopkg.in/yaml.v3"
 )
 
@@ -303,5 +304,17 @@ func TestPutConfigNoHookKeepsLegacyRestart(t *testing.T) {
 	}
 	if got := decode(t, rec)["data"].(map[string]interface{})["applied"]; got != "restart" {
 		t.Fatalf("applied = %v, want restart without hook", got)
+	}
+}
+
+func TestCameraRestartIneligibleOnSubstreamChange(t *testing.T) {
+	old := config.DefaultConfig().Camera
+	newCfg := old
+	newCfg.Substream.Enabled = true
+	if cameraRestartEligible(old, newCfg) {
+		t.Fatal("substream changes need the full process restart (boot-static pipeline)")
+	}
+	if !cameraRestartEligible(old, old) {
+		t.Fatal("identical config must stay eligible")
 	}
 }
