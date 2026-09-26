@@ -1,6 +1,7 @@
 package web
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -174,5 +175,74 @@ func TestStreamingHandlersOutliveWriteTimeout(t *testing.T) {
 func TestWriteTimeoutStillAppliesToPlainHandlers(t *testing.T) {
 	if got := streamBeyondDeadline(t, false); got >= 3 {
 		t.Fatalf("plain handler must still be cut by WriteTimeout, got %d/3 chunks", got)
+	}
+}
+
+// pacedReader yields the payload in slow chunks — a request body arriving
+// slower than the server's ReadTimeout, like an AI model upload on a weak
+// Wi-Fi link.
+type pacedReader struct {
+	chunks [][]byte
+	i      int
+}
+
+func (p *pacedReader) Read(b []byte) (int, error) {
+	if p.i >= len(p.chunks) {
+		return 0, io.EOF
+	}
+	time.Sleep(80 * time.Millisecond)
+	n := copy(b, p.chunks[p.i])
+	p.i++
+	return n, nil
+}
+
+// uploadBeyondReadDeadline mounts a body-counting handler (the AI model
+// upload shape) through the real middleware chain on a server with a short
+// ReadTimeout; the client's body arrives slower than that. Reports whether
+// the handler saw the FULL body.
+func uploadBeyondReadDeadline(t *testing.T, extend bool) bool {
+	t.Helper()
+	s := &Server{observe: NewObserve()}
+	srv := httptest.NewUnstartedServer(s.observeMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if extend {
+			extendReadDeadline(w)
+		}
+		total, _ := io.Copy(io.Discard, r.Body)
+		fmt.Fprintf(w, "%d", total)
+	})))
+	srv.Config.ReadTimeout = 150 * time.Millisecond
+	srv.Start()
+	defer srv.Close()
+
+	body := &pacedReader{chunks: [][]byte{[]byte("chunk"), []byte("chunk"), []byte("chunk"), []byte("chunk")}}
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/api/ai/models/x", body)
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	req.ContentLength = 20 // 4 paced 5-byte chunks
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		return false // connection killed mid-upload — the deadline won
+	}
+	defer resp.Body.Close()
+	got, _ := io.ReadAll(resp.Body)
+	return string(got) == "20"
+}
+
+// TestUploadsOutliveReadTimeout: a large multipart body (AI model upload,
+// up to tens of MB) on a slow link takes longer than the default 10s
+// ReadTimeout to arrive — the upload endpoint must extend its read
+// deadline or slow clients can never upload.
+func TestUploadsOutliveReadTimeout(t *testing.T) {
+	if !uploadBeyondReadDeadline(t, true) {
+		t.Fatal("deadline-extended upload must receive the full body")
+	}
+}
+
+// TestReadTimeoutStillAppliesToPlainHandlers documents the other half:
+// the global read deadline keeps guarding body reads on normal routes.
+func TestReadTimeoutStillAppliesToPlainHandlers(t *testing.T) {
+	if uploadBeyondReadDeadline(t, false) {
+		t.Fatal("body paced past the deadline must not arrive in full for a plain handler")
 	}
 }
