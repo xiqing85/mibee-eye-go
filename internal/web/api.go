@@ -313,6 +313,7 @@ func (s *Server) handleAIModelUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	extendReadDeadline(w) // slow links: the model body can outlive ReadTimeout
 	r.Body = http.MaxBytesReader(w, r.Body, ai.UploadMaxBytes+(1<<20))
 	if err := r.ParseMultipartForm(1 << 20); err != nil {
 		writeError(w, http.StatusRequestEntityTooLarge, "multipart parse failed (size cap?)")

@@ -6,8 +6,8 @@ github.com/discoviking/fsm v0.0.0-20150126104936-f4a273feecca h1:cTTdXpkQ1aVbOOm
 github.com/discoviking/fsm v0.0.0-20150126104936-f4a273feecca/go.mod h1:W+3LQaEkN8qAwwcw0KC546sUEnX86GIT8CcMLZC4mG0=
 github.com/emmansun/gmsm v0.44.1 h1:zDTkdtLWFG0vCbhPV+k9pte14tix/eK71At9Iai9fP4=
 github.com/emmansun/gmsm v0.44.1/go.mod h1:p6RIUta0/KboFHrOxr1x8q+pd8RZtdaTO7XNp0RmMQM=
-github.com/ghettovoice/gosip v0.0.0-20260603143348-d1f3b494c69a h1:k/7ZEbDy5yBYs723U66dtG7Z2IU1oNBd2y1lW6oYF40=
-github.com/ghettovoice/gosip v0.0.0-20260603143348-d1f3b494c69a/go.mod h1:Cb2Ioas/4d5T9XUMFKLxjMxjmZVBONNrICOyiDdS4Xw=
+github.com/ghettovoice/gosip v0.0.0-20260919124345-798b72cc95a2 h1:t4lr+ZXZzqOzzd0zLqR2Y87p6AnwFyuDSsJqbGsidf0=
+github.com/ghettovoice/gosip v0.0.0-20260919124345-798b72cc95a2/go.mod h1:Cb2Ioas/4d5T9XUMFKLxjMxjmZVBONNrICOyiDdS4Xw=
 github.com/gobwas/httphead v0.1.0 h1:exrUm0f4YX0L7EBwZHuCF4GDp8aJfVeBrlLQrs6NqWU=
 github.com/gobwas/httphead v0.1.0/go.mod h1:O/RXo79gxV8G+RqlR/otEwx4Q36zl9rqC5u12GKvMCM=
 github.com/gobwas/pool v0.2.1 h1:xfeeEhW7pwmX8nuLVlqbzVc7udMDrwetjEv+TZIz1og=
@@ -24,8 +24,8 @@ github.com/mattn/go-isatty v0.0.8 h1:HLtExJ+uU2HOZ+wI0Tt5DtUDrx8yhUqDcp7fYERX4CE
 github.com/mattn/go-isatty v0.0.8/go.mod h1:Iq45c/XA43vh69/j3iqttzPXn0bhXyGjM0Hdxcsrc5s=
 github.com/mgutz/ansi v0.0.0-20170206155736-9520e82c474b h1:j7+1HpAFS1zy5+Q4qx1fWh90gTKwiN4QCGoY9TWyyO4=
 github.com/mgutz/ansi v0.0.0-20170206155736-9520e82c474b/go.mod h1:01TrycV0kFyexm33Z7vhZRXopbI8J3TDReVlkTgMUxE=
-github.com/mickeyzzc/gb28181-go v0.11.0 h1:PudM4QXwQlHpksguatI28Jlrzd+gRU6EUzvxNZDLarM=
-github.com/mickeyzzc/gb28181-go v0.11.0/go.mod h1:5QydE8958PXrC6MfPx9wPgG0JBAm4ozSpPt/OLZV0UM=
+github.com/mickeyzzc/gb28181-go v0.11.1-0.20260926135633-a0b620bfc7a3 h1:wzP0NxvVL0V4cUL07ddb5yUz2KOIhBOSMrEF2ZK+PsI=
+github.com/mickeyzzc/gb28181-go v0.11.1-0.20260926135633-a0b620bfc7a3/go.mod h1:BHoRPKNAn9T8uPDFuYGl2ybBNDA5+IHNbyLsb3v230g=
 github.com/mickeyzzc/onvif-go/v2 v2.2.1-0.20260921022527-139101121644 h1:5Y4vh3GYDNOiVr3aRQWODW7euox2sW4YuTuIAG5JofE=
 github.com/mickeyzzc/onvif-go/v2 v2.2.1-0.20260921022527-139101121644/go.mod h1:Ev+Uh2j6Ii6pJ5JrHm50wv4ZburLr97GZwTYovj0YsU=
 github.com/pion/logging v0.2.4 h1:tTew+7cmQ+Mc1pTBLKH2puKsOvhm32dROumOZ655zB8=
