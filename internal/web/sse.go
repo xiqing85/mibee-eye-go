@@ -87,6 +87,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
+	clearWriteDeadline(w) // SSE is long-lived; exempt from WriteTimeout
 
 	client := &sseClient{ch: make(chan []byte, 16), closed: make(chan struct{})}
 	s.hub.add(client)

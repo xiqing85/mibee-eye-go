@@ -516,6 +516,14 @@ type statusInterceptor struct {
 	bytes  int
 }
 
+// Unwrap lets http.ResponseController reach the underlying writer's
+// deadline controls. Without it, streaming handlers' clearWriteDeadline
+// gets ErrNotSupported through the middleware chain and the global
+// WriteTimeout keeps cutting chunked streams (MSE/SSE) mid-response.
+func (w *statusInterceptor) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
 func (w *statusInterceptor) WriteHeader(code int) {
 	w.status = code
 	w.ResponseWriter.WriteHeader(code)
