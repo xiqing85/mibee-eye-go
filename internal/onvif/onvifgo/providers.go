@@ -1,6 +1,8 @@
 package onvifgo
 
 import (
+	"strings"
+
 	"fmt"
 
 	"github.com/xiqing85/mibee-eye-go/internal/camera"
@@ -36,13 +38,17 @@ func newStreamProvider(rtspPort int) *streamProvider {
 	return &streamProvider{rtspPort: rtspPort}
 }
 
-// Stream implements provider.StreamURIProvider. The profile token is
-// accepted as-is: the NVR echoes the token from GetProfiles, but the URI
-// is always this service's single RTSP mount.
+// Stream implements provider.StreamURIProvider. The `sub` token maps to
+// the low-resolution RTSP /sub mount (SPEC appendix A #20); every other
+// token — including the NVR-echoed `main` — resolves to the primary
+// /stream mount, exactly as before the substream profile existed.
 func (p *streamProvider) Stream(profileToken string) (provider.StreamInfo, error) {
-	_ = profileToken
+	path := "/stream"
+	if strings.EqualFold(profileToken, "sub") {
+		path = "/sub"
+	}
 	return provider.StreamInfo{
-		RTSPPath: "/stream",
+		RTSPPath: path,
 		RTSPPort: p.rtspPort,
 	}, nil
 }

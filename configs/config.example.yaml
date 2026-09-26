@@ -42,6 +42,22 @@ camera:
   # (Pi libcamera has no transpose support; the pipeline routes around).
   rotation: 0
 
+  # Low-resolution bandwidth-saving substream (SPEC appendix A #20).
+  # Second H.264 encoder session over the downscaled (already
+  # rotated/flipped) main frames: RTSP /sub mount, ONVIF profile `sub`
+  # (GetStreamUri routes by ProfileToken), web stream.sub.mse +
+  # capabilities.substream. Recording/GB28181/AI stay on the main stream.
+  # Only raw-pixel paths can feed it: v4l2 mode, or rpicamvid with
+  # rotation 90/270; enabling it elsewhere warns and disables.
+  # Dimensions must be even and <= the effective (post-rotation) main
+  # dims; fps: 0 follows camera.fps. Restart to apply.
+  substream:
+    enabled: false
+    width: 640
+    height: 360
+    fps: 0
+    bitrate: 400000
+
   # Target bitrate in bits per second (2 Mbps)
   bitrate: 2000000
 

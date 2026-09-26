@@ -99,6 +99,7 @@ See `configs/config.example.yaml` for all configuration options. Key settings in
 - `camera.idr_period` - Keyframe interval; also bounds the AI detection cadence
 - `camera.hflip` / `camera.vflip` - Flips baked into the stream (applied via unified restart)
 - `camera.rotation` - Quarter-turn rotation (0/90/180/270° clockwise) baked into the stream; 90/270 swap the announced resolution. rpicamvid: 0/180 via libcamera flips, 90/270 via a raw-YUV subprocess + in-process transpose + hardware M2M encode (Pi libcamera has no transpose support); v4l2: in-process transpose; other modes reject non-zero
+- `camera.substream.*` - Low-resolution bandwidth-saving substream (default off: 640x360, 400 kbps, `fps: 0` follows the main rate). A second encoder session encodes the downscaled (already rotated/flipped) main frames: RTSP `/sub` mount, ONVIF `sub` profile (GetStreamUri routes by ProfileToken), web `/api/cameras/0/stream.sub.mse` + `capabilities.substream`. Recording, GB28181 and AI stay on the main stream. Only the raw-pixel paths can feed it — `v4l2` mode and `rpicamvid` with rotation 90/270; enabling it elsewhere warns and disables. Restart to apply
 - `rtsp.port` - RTSP streaming port (8554 default)
 - `onvif.port` - ONVIF HTTP/SOAP port (8080 default)
 - `onvif.username/password` - ONVIF authentication credentials

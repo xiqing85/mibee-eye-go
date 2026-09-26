@@ -25,23 +25,28 @@ import (
 
 // Config holds the web server configuration.
 type Config struct {
-	Port              int                   // listen port (default 8088)
-	Username          string                // admin user (default = onvif user)
-	Password          string                // admin pass (default = onvif pass)
-	AllowedOrigins    []string              // CORS allowed origins (default ["*"])
-	ConfigPath        string                // path to config.yaml (used by PUT /api/config)
-	OnvifConfig       config.ConfigProvider // read-only onvif/rtsp config
-	GB28181Config     *config.GB28181Config // GB28181 configuration
-	Params            *camera.ParamManager  // imaging parameter manager
-	AUHub             *h264.AUHub           // H.264 access-unit hub
-	AI                *ai.Service           // AI detection service (nil = disabled/unavailable)
-	Version           string                // build version from ldflags
-	Logger            *log.Logger           // nil -> log.Default()
-	ReadHeaderTimeout time.Duration         // http.Server.ReadHeaderTimeout (0 = default 5s)
-	ReadTimeout       time.Duration         // http.Server.ReadTimeout (0 = default 10s)
-	WriteTimeout      time.Duration         // http.Server.WriteTimeout (0 = streaming endpoints)
-	IdleTimeout       time.Duration         // http.Server.IdleTimeout (0 = default 120s)
-	CameraStatus      func() bool           // returns camera alive status (nil = unavailable)
+	Port           int                   // listen port (default 8088)
+	Username       string                // admin user (default = onvif user)
+	Password       string                // admin pass (default = onvif pass)
+	AllowedOrigins []string              // CORS allowed origins (default ["*"])
+	ConfigPath     string                // path to config.yaml (used by PUT /api/config)
+	OnvifConfig    config.ConfigProvider // read-only onvif/rtsp config
+	GB28181Config  *config.GB28181Config // GB28181 configuration
+	Params         *camera.ParamManager  // imaging parameter manager
+	AUHub          *h264.AUHub           // H.264 access-unit hub
+	// SubAUHub is the low-resolution substream hub (SPEC appendix A #20);
+	// nil = substream disabled (capability false, endpoint 404).
+	SubAUHub *h264.AUHub
+	// SubstreamDims feeds the sub MSE init segment's track dimensions.
+	SubstreamDims     func() (uint32, uint32)
+	AI                *ai.Service   // AI detection service (nil = disabled/unavailable)
+	Version           string        // build version from ldflags
+	Logger            *log.Logger   // nil -> log.Default()
+	ReadHeaderTimeout time.Duration // http.Server.ReadHeaderTimeout (0 = default 5s)
+	ReadTimeout       time.Duration // http.Server.ReadTimeout (0 = default 10s)
+	WriteTimeout      time.Duration // http.Server.WriteTimeout (0 = streaming endpoints)
+	IdleTimeout       time.Duration // http.Server.IdleTimeout (0 = default 120s)
+	CameraStatus      func() bool   // returns camera alive status (nil = unavailable)
 	// RestartCamera rebuilds the camera pipeline in place for
 	// geometry-preserving camera changes (SPEC §5 applied:"camera_restart";
 	// nil = feature unavailable, everything takes the process restart).
@@ -249,6 +254,7 @@ func (s *Server) registerRoutes() {
 	m.HandleFunc("GET /api/cameras/{id}", s.authRequired(s.handleCameraGet))
 	m.HandleFunc("GET /api/cameras/{id}/snapshot", s.authRequired(s.handleCameraSnapshot))
 	m.HandleFunc("GET /api/cameras/{id}/stream.mse", s.authRequired(s.handleStreamMSEPath))
+	m.HandleFunc("GET /api/cameras/{id}/stream.sub.mse", s.authRequired(s.handleStreamSubMSEPath))
 	m.HandleFunc("GET /api/config", s.authRequired(s.handleGetConfig))
 	m.HandleFunc("PUT /api/config", s.authRequired(s.handlePutConfig))
 	m.HandleFunc("POST /api/system/restart", s.authRequired(s.handleSystemRestart))
@@ -312,6 +318,12 @@ func (s *Server) handleCameraSnapshot(w http.ResponseWriter, r *http.Request) {
 // handleStreamMSEPath adapts the path-param route onto handleStreamMSE.
 func (s *Server) handleStreamMSEPath(w http.ResponseWriter, r *http.Request) {
 	s.handleStreamMSE(w, r, r.PathValue("id"))
+}
+
+// handleStreamSubMSEPath adapts the path-param route onto the substream
+// MSE handler (SPEC appendix A #20).
+func (s *Server) handleStreamSubMSEPath(w http.ResponseWriter, r *http.Request) {
+	s.handleStreamSubMSE(w, r, r.PathValue("id"))
 }
 
 // handleStatic serves the embedded shared frontend (index.html, style.css,

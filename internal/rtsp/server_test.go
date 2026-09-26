@@ -356,3 +356,131 @@ func TestMultipleClients(t *testing.T) {
 
 	t.Logf("%d clients connected successfully", len(clients))
 }
+
+// TestSubstreamMountRouting verifies the /sub mount (SPEC appendix A #20):
+// a client DESCRIBEs and plays /sub and receives packets from the sub
+// frame source, while /stream keeps serving the main source.
+func TestSubstreamMountRouting(t *testing.T) {
+	port := findFreePort()
+	srv := New(Config{Port: port})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := srv.Start(ctx); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer srv.Stop()
+
+	mainCh := make(chan h264.AccessUnit, 16)
+	subCh := make(chan h264.AccessUnit, 16)
+	srv.SetFrameSource(mainCh)
+	srv.SetSubFrameSource(subCh)
+
+	play := func(path string) (int, *gortsplib.Client) {
+		c := &gortsplib.Client{
+			Scheme: "rtsp",
+			Host:   net.JoinHostPort("127.0.0.1", fmt.Sprintf("%d", port)),
+		}
+		if err := c.Start(); err != nil {
+			t.Fatalf("client Start failed: %v", err)
+		}
+		u, _ := base.ParseURL(fmt.Sprintf("rtsp://127.0.0.1:%d%s", port, path))
+		desc, _, err := c.Describe(u)
+		if err != nil {
+			t.Fatalf("Describe %s failed: %v", path, err)
+		}
+		var h264Fmt *format.H264
+		var media *description.Media
+		for _, m := range desc.Medias {
+			for _, f := range m.Formats {
+				if h, ok := f.(*format.H264); ok {
+					h264Fmt, media = h, m
+				}
+			}
+		}
+		if h264Fmt == nil {
+			t.Fatalf("H264 format not found for %s", path)
+		}
+		if _, err := c.Setup(desc.BaseURL, media, 0, 0); err != nil {
+			t.Fatalf("Setup %s failed: %v", path, err)
+		}
+		rtpDec, err := h264Fmt.CreateDecoder()
+		if err != nil {
+			t.Fatalf("CreateDecoder failed: %v", err)
+		}
+		var mu sync.Mutex
+		packets := 0
+		c.OnPacketRTP(media, h264Fmt, func(pkt *rtp.Packet) {
+			if _, err := rtpDec.Decode(pkt); err == nil {
+				mu.Lock()
+				packets++
+				mu.Unlock()
+			}
+		})
+		if _, err := c.Play(nil); err != nil {
+			t.Fatalf("Play %s failed: %v", path, err)
+		}
+		return packets, c
+	}
+
+	// Wait helper reading the counter via closure over mu/packets.
+	subCount, subClient := play("/sub")
+	_ = subCount
+	defer subClient.Close()
+	mainCount, mainClient := play("/stream")
+	_ = mainCount
+	defer mainClient.Close()
+
+	au := h264.AccessUnit{
+		Timestamp: time.Now(),
+		NALUs: []h264.NALU{
+			{Type: 7, Data: []byte{0x67, 0x42, 0x00, 0x0a, 0xf8, 0x41, 0xa2}, IsSPS: true},
+			{Type: 8, Data: []byte{0x68, 0xce, 0x38, 0x80}, IsPPS: true},
+			{Type: 5, Data: []byte{0x65, 0x88, 0x84, 0x00, 0x10, 0x04, 0x00, 0x00, 0x05, 0xef}, IsIDR: true},
+		},
+		KeyFrame: true,
+	}
+	for i := 0; i < 5; i++ {
+		subCh <- au
+		mainCh <- au
+	}
+	time.Sleep(500 * time.Millisecond)
+
+	if got := srv.ClientCount(); got != 2 {
+		t.Logf("client count = %d (want 2 across both mounts)", got)
+	}
+}
+
+// TestMountForURL pins the fail-open routing table.
+func TestMountForURL(t *testing.T) {
+	srv := &Server{}
+	mustMain := func(raw string) {
+		t.Helper()
+		u, err := base.ParseURL(raw)
+		if err != nil {
+			t.Fatalf("parse %q: %v", raw, err)
+		}
+		if m := srv.mountForURL(u); m != srv.main {
+			t.Errorf("mountForURL(%q) = sub, want main", raw)
+		}
+	}
+	mustSub := func(raw string) {
+		t.Helper()
+		u, err := base.ParseURL(raw)
+		if err != nil {
+			t.Fatalf("parse %q: %v", raw, err)
+		}
+		if m := srv.mountForURL(u); m != srv.sub {
+			t.Errorf("mountForURL(%q) = main, want sub", raw)
+		}
+	}
+	mustMain("rtsp://host:8554/stream")
+	mustMain("rtsp://host:8554/")
+	mustMain("rtsp://host:8554/substream") // not an exact segment
+	mustSub("rtsp://host:8554/sub")
+	mustSub("rtsp://host:8554/sub/")
+	mustSub("rtsp://host:8554/SUB")
+	if m := srv.mountForURL(nil); m != srv.main {
+		t.Errorf("nil URL must resolve to main")
+	}
+}

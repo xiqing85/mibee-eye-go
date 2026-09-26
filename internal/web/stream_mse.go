@@ -130,7 +130,30 @@ func (s *Server) handleStreamMSE(w http.ResponseWriter, r *http.Request, cameraI
 		http.Error(w, "streaming not available", http.StatusServiceUnavailable)
 		return
 	}
+	s.streamMSE(w, r, s.cfg.AUHub, func() (uint32, uint32) { return s.cameraDimensions() })
+}
 
+// handleStreamSubMSE streams the low-resolution substream as fMP4 (SPEC
+// appendix A #20). 404 unless the substream pipeline wired its hub
+// (`capabilities.substream`).
+func (s *Server) handleStreamSubMSE(w http.ResponseWriter, r *http.Request, cameraID string) {
+	if cameraID != "0" {
+		writeError(w, http.StatusNotFound, "no such camera")
+		return
+	}
+	if s.cfg.SubAUHub == nil {
+		writeError(w, http.StatusNotFound, "substream not enabled")
+		return
+	}
+	dims := s.cfg.SubstreamDims
+	if dims == nil {
+		dims = func() (uint32, uint32) { return 640, 360 }
+	}
+	s.streamMSE(w, r, s.cfg.SubAUHub, dims)
+}
+
+// streamMSE is the shared chunked-fMP4 body behind both MSE endpoints.
+func (s *Server) streamMSE(w http.ResponseWriter, r *http.Request, hub *h264.AUHub, dims func() (uint32, uint32)) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
@@ -142,8 +165,8 @@ func (s *Server) handleStreamMSE(w http.ResponseWriter, r *http.Request, cameraI
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
 
-	sub := s.cfg.AUHub.Subscribe(r.Context())
-	defer s.cfg.AUHub.Unsubscribe(sub.ID)
+	sub := hub.Subscribe(r.Context())
+	defer hub.Unsubscribe(sub.ID)
 
 	var cachedSPS, cachedPPS []byte
 	initialized := false
@@ -187,7 +210,7 @@ func (s *Server) handleStreamMSE(w http.ResponseWriter, r *http.Request, cameraI
 			if !au.KeyFrame || cachedSPS == nil || cachedPPS == nil {
 				continue
 			}
-			width, height := s.cameraDimensions()
+			width, height := dims()
 			if _, err := w.Write(buildInitSegment(cachedSPS, cachedPPS, width, height)); err != nil {
 				return
 			}
