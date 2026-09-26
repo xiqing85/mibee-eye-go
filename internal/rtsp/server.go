@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -39,23 +40,38 @@ type Config struct {
 	UDPRTCPPort int
 }
 
+// mount is one served stream: the session-owned gortsplib stream plus its
+// own media, RTP encoder and frame source. The main mount serves every
+// URL (fail-open, the historical single-stream behavior); the sub mount
+// serves the exact `/sub` path segment (SPEC appendix A #20).
+type mount struct {
+	stream     *gortsplib.ServerStream
+	media      *description.Media
+	format     *format.H264
+	rtpEncoder *rtph264.Encoder
+
+	frameSource <-chan h264.AccessUnit
+	clientCount int
+	baseTime    time.Time
+	cancel      context.CancelFunc
+}
+
 // Server wraps gortsplib for H.264 streaming.
 // It reads H.264 access units from a frame source channel and
 // distributes them as RTP packets to connected RTSP clients.
 type Server struct {
 	cfg        Config
 	rtspServer *gortsplib.Server
-	stream     *gortsplib.ServerStream
-	media      *description.Media
-	h264Format *format.H264
-	rtpEncoder *rtph264.Encoder
 
-	mu           sync.Mutex
-	frameSource  <-chan h264.AccessUnit
-	clientCount  int
-	baseTime     time.Time // reference time for PTS calculation
-	cancelStream context.CancelFunc
-	wg           sync.WaitGroup
+	mu   sync.Mutex
+	main *mount // primary stream (any URL)
+	sub  *mount // low-resolution substream (RTSP /sub)
+
+	// Sessions map onto their mount so PLAY/TEARDOWN accounting hits the
+	// right stream (SetSetup records it).
+	sessions map[*gortsplib.ServerSession]*mount
+
+	wg sync.WaitGroup
 }
 
 // New creates a new RTSP server instance. Call Start() to begin listening.
@@ -67,23 +83,26 @@ func New(cfg Config) *Server {
 		cfg.WriteQueueSize = 2048
 	}
 
-	h264Fmt := &format.H264{
-		PayloadTyp:        96,
-		PacketizationMode: 1,
-	}
-
 	return &Server{
-		cfg:        cfg,
-		h264Format: h264Fmt,
+		cfg: cfg,
+		main: &mount{
+			format: &format.H264{PayloadTyp: 96, PacketizationMode: 1},
+		},
+		sub: &mount{
+			format: &format.H264{PayloadTyp: 96, PacketizationMode: 1},
+		},
+		sessions: map[*gortsplib.ServerSession]*mount{},
 	}
 }
 
 // Start begins listening for RTSP connections.
 func (s *Server) Start(ctx context.Context) error {
 	addr := fmt.Sprintf(":%d", s.cfg.Port)
-	s.media = &description.Media{
-		Type:    description.MediaTypeVideo,
-		Formats: []format.Format{s.h264Format},
+	for _, m := range []*mount{s.main, s.sub} {
+		m.media = &description.Media{
+			Type:    description.MediaTypeVideo,
+			Formats: []format.Format{m.format},
+		}
 	}
 
 	s.rtspServer = &gortsplib.Server{
@@ -141,18 +160,24 @@ func (s *Server) Start(ctx context.Context) error {
 // Stop gracefully stops the RTSP server and closes all client connections.
 func (s *Server) Stop() error {
 	s.mu.Lock()
-	if s.cancelStream != nil {
-		s.cancelStream()
-		s.cancelStream = nil
+	for _, m := range []*mount{s.main, s.sub} {
+		if m.cancel != nil {
+			m.cancel()
+			m.cancel = nil
+		}
 	}
 	s.mu.Unlock()
 
 	s.wg.Wait()
 
-	if s.stream != nil {
-		s.stream.Close()
-		s.stream = nil
+	s.mu.Lock()
+	for _, m := range []*mount{s.main, s.sub} {
+		if m.stream != nil {
+			m.stream.Close()
+			m.stream = nil
+		}
 	}
+	s.mu.Unlock()
 
 	if s.rtspServer != nil {
 		s.rtspServer.Close()
@@ -164,7 +189,15 @@ func (s *Server) Stop() error {
 // The server starts consuming frames only when at least one client is connected.
 func (s *Server) SetFrameSource(ch <-chan h264.AccessUnit) {
 	s.mu.Lock()
-	s.frameSource = ch
+	s.main.frameSource = ch
+	s.mu.Unlock()
+}
+
+// SetSubFrameSource connects the substream access-unit channel (RTSP /sub
+// mount, SPEC appendix A #20).
+func (s *Server) SetSubFrameSource(ch <-chan h264.AccessUnit) {
+	s.mu.Lock()
+	s.sub.frameSource = ch
 	s.mu.Unlock()
 }
 
@@ -177,7 +210,7 @@ func (s *Server) Port() int {
 func (s *Server) ClientCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.clientCount
+	return s.main.clientCount + s.sub.clientCount
 }
 
 // --- gortsplib.ServerHandler interface ---
@@ -202,13 +235,18 @@ func (s *Server) OnSessionOpen(_ *gortsplib.ServerHandlerOnSessionOpenCtx) {
 }
 
 // OnSessionClose is called when a session is closed.
-func (s *Server) OnSessionClose(_ *gortsplib.ServerHandlerOnSessionCloseCtx) {
+func (s *Server) OnSessionClose(ctx *gortsplib.ServerHandlerOnSessionCloseCtx) {
 	s.mu.Lock()
-	s.clientCount--
-	if s.clientCount == 0 {
-		s.stopFrameReader()
+	defer s.mu.Unlock()
+	m, ok := s.sessions[ctx.Session]
+	if !ok {
+		return
 	}
-	s.mu.Unlock()
+	delete(s.sessions, ctx.Session)
+	m.clientCount--
+	if m.clientCount == 0 {
+		s.stopFrameReaderLocked(m)
+	}
 }
 
 // OnDescribe handles RTSP DESCRIBE requests.
@@ -222,13 +260,8 @@ func (s *Server) OnDescribe(ctx *gortsplib.ServerHandlerOnDescribeCtx) (
 		}
 	}
 
-	s.mu.Lock()
-	if s.stream == nil {
-		s.initStream()
-	}
-	stream := s.stream
-	s.mu.Unlock()
-
+	m := s.mountForURL(ctx.Request.URL)
+	stream := s.streamFor(m)
 	if stream == nil {
 		return &base.Response{StatusCode: base.StatusNotFound}, nil, nil
 	}
@@ -246,11 +279,14 @@ func (s *Server) OnSetup(ctx *gortsplib.ServerHandlerOnSetupCtx) (
 		}
 	}
 
-	s.mu.Lock()
-	if s.stream == nil {
-		s.initStream()
+	m := s.mountForURL(ctx.Request.URL)
+	stream := s.streamFor(m)
+	if stream == nil {
+		return &base.Response{StatusCode: base.StatusNotFound}, nil, nil
 	}
-	stream := s.stream
+
+	s.mu.Lock()
+	s.sessions[ctx.Session] = m
 	s.mu.Unlock()
 
 	return &base.Response{StatusCode: base.StatusOK}, stream, nil
@@ -258,11 +294,15 @@ func (s *Server) OnSetup(ctx *gortsplib.ServerHandlerOnSetupCtx) (
 
 // OnPlay handles RTSP PLAY requests.
 // Starts frame consumption when the first client starts playing.
-func (s *Server) OnPlay(_ *gortsplib.ServerHandlerOnPlayCtx) (*base.Response, error) {
+func (s *Server) OnPlay(ctx *gortsplib.ServerHandlerOnPlayCtx) (*base.Response, error) {
 	s.mu.Lock()
-	s.clientCount++
-	if s.clientCount == 1 {
-		s.startFrameReader()
+	m := s.sessions[ctx.Session]
+	if m == nil {
+		m = s.mountForURL(ctx.Request.URL)
+	}
+	m.clientCount++
+	if m.clientCount == 1 {
+		s.startFrameReaderLocked(m)
 	}
 	s.mu.Unlock()
 
@@ -275,66 +315,92 @@ func (s *Server) hasAuth() bool {
 	return s.cfg.Username != ""
 }
 
-func (s *Server) initStream() {
-	desc := &description.Session{
-		Medias: []*description.Media{s.media},
+// mountForURL resolves the mount for a request URL: an exact `/sub` path
+// segment selects the substream; everything else (including query
+// strings and unknown paths) resolves to the main stream — legacy
+// clients that pass arbitrary URLs keep the historical behavior.
+func (s *Server) mountForURL(u *base.URL) *mount {
+	if u == nil {
+		return s.main
 	}
-	s.stream = &gortsplib.ServerStream{
+	for _, seg := range strings.Split(u.Path, "/") {
+		if strings.EqualFold(seg, "sub") {
+			return s.sub
+		}
+	}
+	return s.main
+}
+
+// streamFor lazily initializes and returns the mount's ServerStream.
+func (s *Server) streamFor(m *mount) *gortsplib.ServerStream {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if m.stream == nil {
+		s.initStreamLocked(m)
+	}
+	return m.stream
+}
+
+func (s *Server) initStreamLocked(m *mount) {
+	desc := &description.Session{
+		Medias: []*description.Media{m.media},
+	}
+	m.stream = &gortsplib.ServerStream{
 		Server: s.rtspServer,
 		Desc:   desc,
 	}
-	if err := s.stream.Initialize(); err != nil {
+	if err := m.stream.Initialize(); err != nil {
 		log.Printf("rtsp: failed to initialize stream: %v", err)
-		s.stream = nil
+		m.stream = nil
 		return
 	}
 
-	// Create RTP encoder if not already created
-	if s.rtpEncoder == nil {
-		enc, err := s.h264Format.CreateEncoder()
+	if m.rtpEncoder == nil {
+		enc, err := m.format.CreateEncoder()
 		if err != nil {
 			log.Printf("rtsp: failed to create RTP encoder: %v", err)
 			return
 		}
-		s.rtpEncoder = enc
+		m.rtpEncoder = enc
 	}
 }
 
-func (s *Server) startFrameReader() {
-	s.baseTime = time.Now()
+func (s *Server) startFrameReaderLocked(m *mount) {
+	m.baseTime = time.Now()
 	ctx, cancel := context.WithCancel(context.Background())
-	s.cancelStream = cancel
+	m.cancel = cancel
 
 	s.wg.Add(1)
-	go s.readFrames(ctx)
+	go s.readFrames(ctx, m)
 }
 
-func (s *Server) stopFrameReader() {
-	if s.cancelStream != nil {
-		s.cancelStream()
-		s.cancelStream = nil
+func (s *Server) stopFrameReaderLocked(m *mount) {
+	if m.cancel != nil {
+		m.cancel()
+		m.cancel = nil
 	}
 }
 
-func (s *Server) readFrames(ctx context.Context) {
+func (s *Server) readFrames(ctx context.Context, m *mount) {
 	defer s.wg.Done()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case au, ok := <-s.frameSource:
+		case au, ok := <-m.frameSource:
 			if !ok {
 				return
 			}
-			s.processAccessUnit(au)
+			s.processAccessUnit(au, m)
 		}
 	}
 }
 
-func (s *Server) processAccessUnit(au h264.AccessUnit) {
+func (s *Server) processAccessUnit(au h264.AccessUnit, m *mount) {
 	s.mu.Lock()
-	stream := s.stream
-	encoder := s.rtpEncoder
+	stream := m.stream
+	encoder := m.rtpEncoder
+	media := m.media
 	s.mu.Unlock()
 
 	if stream == nil || encoder == nil {
@@ -365,7 +431,7 @@ func (s *Server) processAccessUnit(au h264.AccessUnit) {
 	// Check for SPS/PPS in this access unit — update format if needed
 	for _, nalu := range au.NALUs {
 		if nalu.IsSPS || nalu.IsPPS {
-			s.updateFormat(au.NALUs)
+			s.updateFormat(au.NALUs, m)
 			break
 		}
 	}
@@ -375,8 +441,8 @@ func (s *Server) processAccessUnit(au h264.AccessUnit) {
 	// waiting for the next keyframe with embedded SPS/PPS.
 	if hasIDR && (!hasSPS || !hasPPS) {
 		s.mu.Lock()
-		spsData := s.h264Format.SPS
-		ppsData := s.h264Format.PPS
+		spsData := m.format.SPS
+		ppsData := m.format.PPS
 		s.mu.Unlock()
 
 		if spsData != nil && ppsData != nil {
@@ -400,19 +466,19 @@ func (s *Server) processAccessUnit(au h264.AccessUnit) {
 	}
 
 	// Calculate RTP timestamp from time.Time (90kHz clock)
-	pts := uint32(au.Timestamp.Sub(s.baseTime) * time.Duration(90000) / time.Second)
+	pts := uint32(au.Timestamp.Sub(m.baseTime) * time.Duration(90000) / time.Second)
 
 	// Write RTP packets
 	for _, pkt := range pkts {
 		pkt.Timestamp = pts
-		if err := stream.WritePacketRTP(s.media, pkt); err != nil {
+		if err := stream.WritePacketRTP(media, pkt); err != nil {
 			// Stream may have been closed
 			return
 		}
 	}
 }
 
-func (s *Server) updateFormat(nalus []h264.NALU) {
+func (s *Server) updateFormat(nalus []h264.NALU, m *mount) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -427,13 +493,13 @@ func (s *Server) updateFormat(nalus []h264.NALU) {
 	}
 
 	if sps != nil && pps != nil {
-		s.h264Format.SPS = sps
-		s.h264Format.PPS = pps
+		m.format.SPS = sps
+		m.format.PPS = pps
 
 		// Re-initialize stream with updated format only if no clients connected
-		if s.stream != nil && s.clientCount == 0 {
-			s.stream.Close()
-			s.initStream()
+		if m.stream != nil && m.clientCount == 0 {
+			m.stream.Close()
+			s.initStreamLocked(m)
 		}
 	}
 }

@@ -20,27 +20,50 @@ type CameraConfig struct {
 	Mode   string `yaml:"mode"`   // Capture mode: "mtxrpicam" (default), "rpicamvid", "rtsp", or "v4l2"
 	// EncoderDevice is the V4L2 M2M encoder node probed by the v4l2
 	// camera mode (bcm2835-codec-encode on Pi; configure per SoC).
-	EncoderDevice   string        `yaml:"encoder_device"`
-	RTSPURL         string        `yaml:"rtsp_url"`          // External RTSP URL when mode=rtsp
-	Width           int           `yaml:"width"`             // Capture width in pixels
-	Height          int           `yaml:"height"`            // Capture height in pixels
-	FPS             int           `yaml:"fps"`               // Frames per second
-	Codec           string        `yaml:"codec"`             // Video codec (h264)
-	Bitrate         int           `yaml:"bitrate"`           // Target bitrate in bps
-	Brightness      float64       `yaml:"brightness"`        // -1.0 to 1.0
-	Contrast        float64       `yaml:"contrast"`          // 0.0 to 32.0
-	Saturation      float64       `yaml:"saturation"`        // 0.0 to 32.0
-	Sharpness       float64       `yaml:"sharpness"`         // 0.0 to 16.0
-	IDRPeriod       int           `yaml:"idr_period"`        // Keyframe interval (1=every frame, 15=every 15th)
-	BinPath         string        `yaml:"bin_path"`          // Path to mtxrpicam binary
-	FFmpegBin       string        `yaml:"ffmpeg_bin"`        // ffmpeg binary (v4l2 fallback encoder, snapshot transcode)
-	StillBin        string        `yaml:"still_bin"`         // still-capture binary (rpicam-still) for /snapshot JPEG tier
-	VidBin          string        `yaml:"vid_bin"`           // rpicam-vid binary (camera.mode: rpicamvid)
-	FrameBufferSize int           `yaml:"frame_buffer_size"` // Frame channel buffer capacity
-	MaxBackoff      time.Duration `yaml:"max_backoff"`       // Max subprocess restart backoff
-	HFlip           bool          `yaml:"hflip"`             // Device-level horizontal mirror (baked into the encoded stream)
-	VFlip           bool          `yaml:"vflip"`             // Device-level vertical flip (upside-down mount compensation)
-	Rotation        int           `yaml:"rotation"`          // Device-level rotation, clockwise degrees 0|90|180|270 (SPEC appendix A #19; baked into the stream; rpicamvid + v4l2 modes)
+	EncoderDevice   string          `yaml:"encoder_device"`
+	RTSPURL         string          `yaml:"rtsp_url"`          // External RTSP URL when mode=rtsp
+	Width           int             `yaml:"width"`             // Capture width in pixels
+	Height          int             `yaml:"height"`            // Capture height in pixels
+	FPS             int             `yaml:"fps"`               // Frames per second
+	Codec           string          `yaml:"codec"`             // Video codec (h264)
+	Bitrate         int             `yaml:"bitrate"`           // Target bitrate in bps
+	Brightness      float64         `yaml:"brightness"`        // -1.0 to 1.0
+	Contrast        float64         `yaml:"contrast"`          // 0.0 to 32.0
+	Saturation      float64         `yaml:"saturation"`        // 0.0 to 32.0
+	Sharpness       float64         `yaml:"sharpness"`         // 0.0 to 16.0
+	IDRPeriod       int             `yaml:"idr_period"`        // Keyframe interval (1=every frame, 15=every 15th)
+	BinPath         string          `yaml:"bin_path"`          // Path to mtxrpicam binary
+	FFmpegBin       string          `yaml:"ffmpeg_bin"`        // ffmpeg binary (v4l2 fallback encoder, snapshot transcode)
+	StillBin        string          `yaml:"still_bin"`         // still-capture binary (rpicam-still) for /snapshot JPEG tier
+	VidBin          string          `yaml:"vid_bin"`           // rpicam-vid binary (camera.mode: rpicamvid)
+	FrameBufferSize int             `yaml:"frame_buffer_size"` // Frame channel buffer capacity
+	MaxBackoff      time.Duration   `yaml:"max_backoff"`       // Max subprocess restart backoff
+	HFlip           bool            `yaml:"hflip"`             // Device-level horizontal mirror (baked into the encoded stream)
+	VFlip           bool            `yaml:"vflip"`             // Device-level vertical flip (upside-down mount compensation)
+	Rotation        int             `yaml:"rotation"`          // Device-level rotation, clockwise degrees 0|90|180|270 (SPEC appendix A #19; baked into the stream; rpicamvid + v4l2 modes)
+	Substream       SubstreamConfig `yaml:"substream"`         // Low-resolution bandwidth-saving substream (SPEC appendix A #20)
+}
+
+// SubstreamConfig is the low-resolution bandwidth-saving substream
+// ([camera.substream], SPEC appendix A #20): a second H.264 encode of the
+// (already rotated/flipped) main capture frames, exposed as the RTSP /sub
+// mount, the ONVIF `sub` profile and the web stream.sub.mse endpoint.
+// Main stream, recording, GB28181 and AI stay on the main encode.
+// Restart to apply (the pipeline is boot-static).
+type SubstreamConfig struct {
+	Enabled bool `yaml:"enabled"` // default false
+	Width   int  `yaml:"width"`   // default 640 (even, <= effective main dims)
+	Height  int  `yaml:"height"`  // default 360
+	FPS     int  `yaml:"fps"`     // 0 = follow camera.fps
+	Bitrate int  `yaml:"bitrate"` // default 400000
+}
+
+// EffectiveFPS resolves the sub frame rate (0 follows mainFPS).
+func (sc *SubstreamConfig) EffectiveFPS(mainFPS int) int {
+	if sc.FPS <= 0 {
+		return mainFPS
+	}
+	return sc.FPS
 }
 
 // EffectiveDims returns the stream resolution after camera.rotation is
@@ -251,6 +274,13 @@ func DefaultConfig() *Config {
 			HFlip:           false,
 			VFlip:           false,
 			Rotation:        0,
+			Substream: SubstreamConfig{
+				Enabled: false,
+				Width:   640,
+				Height:  360,
+				FPS:     0,
+				Bitrate: 400_000,
+			},
 		},
 		RTSP: RTSPConfig{
 			Port:                 8554,
@@ -453,6 +483,11 @@ func applyEnvOverrides(cfg *Config) {
 	overrideString("MIBEE_EYE_CAMERA_VID_BIN", &cfg.Camera.VidBin)
 	overrideInt("MIBEE_EYE_CAMERA_FRAME_BUFFER_SIZE", &cfg.Camera.FrameBufferSize)
 	overrideDuration("MIBEE_EYE_CAMERA_MAX_BACKOFF", &cfg.Camera.MaxBackoff)
+	overrideBool("MIBEE_EYE_CAMERA_SUBSTREAM_ENABLED", &cfg.Camera.Substream.Enabled)
+	overrideInt("MIBEE_EYE_CAMERA_SUBSTREAM_WIDTH", &cfg.Camera.Substream.Width)
+	overrideInt("MIBEE_EYE_CAMERA_SUBSTREAM_HEIGHT", &cfg.Camera.Substream.Height)
+	overrideInt("MIBEE_EYE_CAMERA_SUBSTREAM_FPS", &cfg.Camera.Substream.FPS)
+	overrideInt("MIBEE_EYE_CAMERA_SUBSTREAM_BITRATE", &cfg.Camera.Substream.Bitrate)
 	// RTSP section
 	overrideInt("MIBEE_EYE_RTSP_PORT", &cfg.RTSP.Port)
 	overrideString("MIBEE_EYE_RTSP_USERNAME", &cfg.RTSP.Username)
@@ -598,6 +633,23 @@ func (c *Config) Validate() error {
 	}
 	if c.Camera.Codec != "h264" && c.Camera.Codec != "h265" {
 		return fmt.Errorf("config.camera.codec: %w", errInvalidCodec)
+	}
+	if c.Camera.Substream.Enabled {
+		sc := &c.Camera.Substream
+		if sc.Width <= 0 || sc.Height <= 0 {
+			return fmt.Errorf("config.camera.substream: width and height must be positive")
+		}
+		if sc.Width%2 != 0 || sc.Height%2 != 0 {
+			return fmt.Errorf("config.camera.substream: dimensions must be even (I420 chroma), got %dx%d", sc.Width, sc.Height)
+		}
+		if sc.Bitrate <= 0 || sc.Bitrate > 50_000_000 {
+			return fmt.Errorf("config.camera.substream: bitrate must be 1..50000000, got %d", sc.Bitrate)
+		}
+		ew, eh := c.Camera.EffectiveDims()
+		if sc.Width > ew || sc.Height > eh {
+			return fmt.Errorf("config.camera.substream: %dx%d exceeds the effective main dims %dx%d (the downscaler never upscales)",
+				sc.Width, sc.Height, ew, eh)
+		}
 	}
 	if c.Camera.IDRPeriod <= 0 {
 		return fmt.Errorf("config.camera.idr_period: %w", errMustBePositive)

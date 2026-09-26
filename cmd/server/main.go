@@ -158,7 +158,7 @@ func (a *configAdapter) CameraCodec() string   { return a.cfg.Camera.Codec }
 // params (config → defaults), CameraInfo, and the mode switch. Extracted
 // so the in-place camera restart (SPEC §5 applied:"camera_restart") can
 // rebuild the pipeline from freshly loaded config with identical logic.
-func buildCameraFromConfig(cfg *config.Config) (camera.Camera, string) {
+func buildCameraFromConfig(cfg *config.Config, subTap func(frame []byte, w, h uint32)) (camera.Camera, string) {
 	cameraParams := camera.DefaultParams()
 	cameraParams.Width = uint32(cfg.Camera.Width)
 	cameraParams.Height = uint32(cfg.Camera.Height)
@@ -200,7 +200,7 @@ func buildCameraFromConfig(cfg *config.Config) (camera.Camera, string) {
 		// Uses the rpicam-vid binary from camera.vid_bin (PATH by default).
 		// The configured bin_path stays pointed at mtxrpicam for fallback.
 		slog.Info("camera: using rpicam-vid subprocess", "bin", cfg.Camera.VidBin)
-		cam = camera.NewRPiCamVidCamera(
+		vidOpts := []camera.RPiCamVidOption{
 			camera.WithVidBinPath(cfg.Camera.VidBin),
 			camera.WithVidParams(cameraParams),
 			camera.WithVidInfo(cameraInfo),
@@ -211,14 +211,22 @@ func buildCameraFromConfig(cfg *config.Config) (camera.Camera, string) {
 			camera.WithVidRotation(cfg.Camera.Rotation),
 			camera.WithVidEncoderDevice(cfg.Camera.EncoderDevice),
 			camera.WithVidFFmpegBin(cfg.Camera.FFmpegBin),
-		)
+		}
+		if subTap != nil {
+			// Only the 90°/270° raw-YUV pipeline can feed the substream;
+			// Start() drops the tap (with a warning) on the H.264 direct
+			// path, which has no in-process frames.
+			vidOpts = append(vidOpts, camera.WithVidSubstream(subTap))
+		}
+		cam = camera.NewRPiCamVidCamera(vidOpts...)
+
 	case "v4l2":
 		// Generic V4L2 backend (any board): pure-Go MMAP capture from
 		// /dev/videoN; M2M hardware encode when encoder_device probes
 		// capable, otherwise a resident ffmpeg subprocess.
 		slog.Info("camera: using generic v4l2 backend", "device", cfg.Camera.Device,
 			"encoder_device", cfg.Camera.EncoderDevice)
-		cam = camera.NewV4L2Source(
+		v4l2Opts := []camera.V4L2Option{
 			camera.WithV4L2Device(cfg.Camera.Device),
 			camera.WithV4L2EncoderDevice(cfg.Camera.EncoderDevice),
 			camera.WithV4L2FFmpegBin(cfg.Camera.FFmpegBin),
@@ -226,7 +234,11 @@ func buildCameraFromConfig(cfg *config.Config) (camera.Camera, string) {
 			camera.WithV4L2Info(cameraInfo),
 			// Go-side pixel transpose before encoding (SPEC appendix A #19).
 			camera.WithV4L2Rotation(cfg.Camera.Rotation),
-		)
+		}
+		if subTap != nil {
+			v4l2Opts = append(v4l2Opts, camera.WithV4L2Substream(subTap))
+		}
+		cam = camera.NewV4L2Source(v4l2Opts...)
 	default:
 		cam = camera.NewRPiCamera(
 			camera.WithBinPath(cfg.Camera.BinPath),
@@ -291,8 +303,57 @@ func main() {
 	slog.Info("MiBee Eye starting", "version", version, "fallback_ip", localIP)
 	adapter := &configAdapter{cfg: cfg, deviceIP: localIP}
 
+	// --- Step 0: Substream pipeline (SPEC appendix A #20) ---
+	// Boot-static second encoder session (downscaled tap of the main
+	// capture frames). Only the raw-pixel paths can feed it: camera.mode
+	// v4l2 and rpicamvid's 90°/270° YUV pipeline. A mode mismatch warns
+	// and disables (fail-open, capabilities.substream stays false).
+	var subPipeline *camera.SubstreamPipeline
+	substreamSupported := false
+	switch cfg.Camera.Mode {
+	case "v4l2":
+		substreamSupported = true
+	case "rpicamvid":
+		substreamSupported = cfg.Camera.Rotation == 90 || cfg.Camera.Rotation == 270
+	}
+	if cfg.Camera.Substream.Enabled {
+		if !substreamSupported {
+			slog.Warn("substream: enabled but not supported by this capture path — disabled",
+				"mode", cfg.Camera.Mode, "rotation", cfg.Camera.Rotation,
+				"note", "needs in-process frames (v4l2 mode or rpicamvid rotation 90/270)")
+		} else {
+			effW, effH := cfg.Camera.EffectiveDims()
+			subFPS := cfg.Camera.Substream.EffectiveFPS(cfg.Camera.FPS)
+			sp, err := camera.NewSubstreamPipeline(camera.SubstreamOptions{
+				SrcW:          effW,
+				SrcH:          effH,
+				Width:         cfg.Camera.Substream.Width,
+				Height:        cfg.Camera.Substream.Height,
+				FPs:           subFPS,
+				Bitrate:       cfg.Camera.Substream.Bitrate,
+				EncoderDevice: cfg.Camera.EncoderDevice,
+				FFmpegBin:     cfg.Camera.FFmpegBin,
+				MainFPS:       cfg.Camera.FPS,
+			})
+			if err != nil {
+				slog.Error("substream: pipeline init failed — continuing without substream", "error", err)
+			} else {
+				subPipeline = sp
+				subPipeline.Run(ctx)
+				slog.Info("substream: H.264 sub encoder started",
+					"width", cfg.Camera.Substream.Width, "height", cfg.Camera.Substream.Height,
+					"fps", subFPS, "bitrate", cfg.Camera.Substream.Bitrate,
+					"mount", "RTSP /sub, ONVIF profile sub, web stream.sub.mse")
+			}
+		}
+	}
+
 	// --- Step 1: Camera ---
-	built, externalRTSPURL := buildCameraFromConfig(cfg)
+	var subTap func(frame []byte, w, h uint32)
+	if subPipeline != nil {
+		subTap = subPipeline.Tap
+	}
+	built, externalRTSPURL := buildCameraFromConfig(cfg, subTap)
 
 	// In-place camera restarts (SPEC §5 applied:"camera_restart"): the
 	// wrapper exposes a stable Frames() channel, so geometry-preserving
@@ -303,7 +364,7 @@ func main() {
 		if err != nil {
 			return nil, err
 		}
-		c, _ := buildCameraFromConfig(fresh)
+		c, _ := buildCameraFromConfig(fresh, subTap)
 		return c, nil
 	}
 	restr := camera.NewRestartable(ctx, built, cameraFactory)
@@ -376,6 +437,53 @@ func main() {
 		}
 	}()
 
+	// Substream hub (SPEC appendix A #20): same parse/inject/pump shape as
+	// the main hub, fed by the sub pipeline's frames.
+	var subAUHub *h264.AUHub
+	if subPipeline != nil {
+		subAUHub = h264.NewAUHubWithSize(cfg.RTSP.SubscriberBufferSize)
+		subAUHub.StartDropLogger(ctx)
+		subParser := h264.NewParser()
+		go func() {
+			var cachedSPS, cachedPPS []byte
+			for frame := range subPipeline.Frames() {
+				nalus := subParser.Parse(frame.Data)
+				if len(nalus) == 0 {
+					continue
+				}
+				hasSPS, hasPPS, hasIDR := false, false, false
+				for _, n := range nalus {
+					if n.IsSPS {
+						cachedSPS = n.Data
+						hasSPS = true
+					}
+					if n.IsPPS {
+						cachedPPS = n.Data
+						hasPPS = true
+					}
+					if n.IsIDR {
+						hasIDR = true
+					}
+				}
+				if hasIDR && (!hasSPS || !hasPPS) && cachedSPS != nil && cachedPPS != nil {
+					injected := make([]h264.NALU, 0, len(nalus)+2)
+					if !hasSPS {
+						injected = append(injected, h264.NALU{Type: 7, Data: cachedSPS, IsSPS: true})
+					}
+					if !hasPPS {
+						injected = append(injected, h264.NALU{Type: 8, Data: cachedPPS, IsPPS: true})
+					}
+					nalus = append(injected, nalus...)
+				}
+				subAUHub.Write(h264.AccessUnit{
+					NALUs:     nalus,
+					Timestamp: frame.Timestamp,
+					KeyFrame:  hasIDR,
+				})
+			}
+		}()
+	}
+
 	// --- Step 2.5: AI detection (SPEC v1 §4.6; fail-open) ---
 	// Taps the AUHub (passive — never the capture/encode path): an ffmpeg
 	// subprocess decodes keyframes, ONNX Runtime runs NanoDet inference.
@@ -436,6 +544,11 @@ func main() {
 			slog.Error("rtsp server start", "error", err)
 			os.Exit(1)
 		}
+		if subAUHub != nil {
+			// The /sub mount consumes the substream hub (SPEC appendix
+			// A #20); no media flows through it until a client plays it.
+			rtspServer.SetSubFrameSource(subAUHub.Subscribe(ctx).Channel)
+		}
 	}
 
 	// --- Step 4: ParamManager ---
@@ -444,7 +557,12 @@ func main() {
 	// --- Step 5: ONVIF Server (onvif-go/v2 transport) ---
 	// Advertises the device's own IP (localIP) in every URL: the NVR consumes
 	// XAddrs and stream URIs verbatim as this camera's endpoint.
-	onvifServer, err := onvifgo.New(cfg, localIP, paramManager, snapshotBuffer)
+	var subInfo *camera.SubstreamInfo
+	if subPipeline != nil {
+		info := subPipeline.Info()
+		subInfo = &info
+	}
+	onvifServer, err := onvifgo.New(cfg, localIP, paramManager, snapshotBuffer, subInfo)
 	if err != nil {
 		slog.Error("onvif server init", "error", err)
 		os.Exit(1)
@@ -474,15 +592,22 @@ func main() {
 	// --- Step 5.5: Web UI Server ---
 	if cfg.Web.Enabled {
 		webServer = web.New(web.Config{
-			Port:              cfg.Web.Port,
-			RestartCamera:     restartCamera,
-			Username:          cfg.Web.Username,
-			Password:          cfg.Web.Password,
-			ConfigPath:        *configPath,
-			OnvifConfig:       adapter,
-			GB28181Config:     &cfg.GB28181,
-			Params:            paramManager,
-			AUHub:             auHub,
+			Port:          cfg.Web.Port,
+			RestartCamera: restartCamera,
+			Username:      cfg.Web.Username,
+			Password:      cfg.Web.Password,
+			ConfigPath:    *configPath,
+			OnvifConfig:   adapter,
+			GB28181Config: &cfg.GB28181,
+			Params:        paramManager,
+			AUHub:         auHub,
+			SubAUHub:      subAUHub,
+			SubstreamDims: func() (uint32, uint32) {
+				if subPipeline != nil {
+					return uint32(subPipeline.Info().Width), uint32(subPipeline.Info().Height)
+				}
+				return 640, 360
+			},
 			AI:                aiService,
 			ReadHeaderTimeout: cfg.Web.ReadHeaderTimeout,
 			ReadTimeout:       cfg.Web.ReadTimeout,
