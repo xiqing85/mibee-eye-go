@@ -110,6 +110,16 @@ func clearWriteDeadline(w http.ResponseWriter) {
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
 }
 
+// extendReadDeadline gives a large-body upload (AI model, up to tens of
+// MB) room to arrive on a slow link: the server's ReadTimeout (default
+// 10s) covers the whole request including the body, so an upload slower
+// than that would be killed mid-flight no matter how small the model is.
+// Bounded rather than cleared — a hung client still gets its goroutine
+// back eventually.
+func extendReadDeadline(w http.ResponseWriter) {
+	_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(10 * time.Minute))
+}
+
 // handleStreamMSE streams H.264 as fMP4 over chunked HTTP.
 func (s *Server) handleStreamMSE(w http.ResponseWriter, r *http.Request, cameraID string) {
 	if cameraID != "0" {
