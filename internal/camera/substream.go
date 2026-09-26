@@ -32,6 +32,19 @@ import (
 // (the sub stream resynchronises on its next IDR).
 const tapCapacity = 2
 
+// failoverBudget consecutive Encode errors switch the pipeline to the
+// ffmpeg fallback; the same budget on the fallback disables the pipeline
+// (SPEC allows the sub endpoints to 404). Field-proven need: a second M2M
+// encoder instance on bcm2835 can starve permanently behind the main
+// encoder (.161, 2026-09-27) — the sync v4l2 Encode leaves OUTPUT buffers
+// queued on poll timeout, so every later QBUF fails with EINVAL and the
+// errors never self-heal.
+const failoverBudget = 10
+
+// warnEveryN rate-limits repeated encode-failure WARNs — the disabling
+// path fires once per frame otherwise and flooded the journal at ~12/s.
+const warnEveryN = 100
+
 // SubstreamOptions carries the [camera.substream] config plus the encoder
 // plumbing shared with the main pipeline.
 type SubstreamOptions struct {
@@ -47,6 +60,9 @@ type SubstreamOptions struct {
 	// Injectable for tests (mirrors the camera backends).
 	ProbeEncoder func(path string) (v4l2.ProbeResult, error)
 	OpenM2M      func(path string, w, h uint32) (frameEncoder, error)
+	// OpenFallback builds the runtime failover encoder (default: the
+	// ffmpeg subprocess). Called on the Run goroutine at failover time.
+	OpenFallback func() (frameEncoder, error)
 }
 
 // SubstreamPipeline owns the second encoder session and the sub frame
@@ -60,6 +76,11 @@ type SubstreamPipeline struct {
 	tapCh    chan []byte
 	stopCh   chan struct{}
 	wg       sync.WaitGroup
+
+	// Failover state — owned by the Run goroutine.
+	openFallback func() (frameEncoder, error)
+	onFallback   bool
+	disabled     bool
 
 	counter atomic.Uint64
 	dropped atomic.Uint64
@@ -115,6 +136,19 @@ func NewSubstreamPipeline(o SubstreamOptions) (*SubstreamPipeline, error) {
 	}
 
 	emit := func(nalus []h264.NALU, key bool) { p.emit(nalus, key) }
+	p.openFallback = o.OpenFallback
+	if p.openFallback == nil {
+		p.openFallback = func() (frameEncoder, error) {
+			if o.FFmpegBin == "" {
+				return nil, fmt.Errorf("substream: no fallback encoder (camera.ffmpeg_bin is empty)")
+			}
+			fp := DefaultParams()
+			fp.Width, fp.Height = uint32(o.Width), uint32(o.Height)
+			fp.FPS = float32(subFPS)
+			fp.Bitrate = uint32(o.Bitrate)
+			return newFFmpegEncoder(o.FFmpegBin, fp, emit)
+		}
+	}
 	if res, err := probe(o.EncoderDevice); err == nil && res.M2MCapable {
 		if enc, err := openM2M(o.EncoderDevice, uint32(o.Width), uint32(o.Height)); err == nil {
 			if m, ok := enc.(*m2mEncoder); ok {
@@ -189,6 +223,7 @@ func (p *SubstreamPipeline) Run(ctx context.Context) {
 			}
 		}()
 		start := time.Now()
+		var consec int // consecutive Encode errors (reset on success)
 		for {
 			select {
 			case <-ctx.Done():
@@ -199,6 +234,9 @@ func (p *SubstreamPipeline) Run(ctx context.Context) {
 				if !ok {
 					return
 				}
+				if p.disabled {
+					continue // drain the tap, keep the main path unblocked
+				}
 				p.counter.Add(1)
 				if p.fpsDiv > 1 && p.counter.Load()%uint64(p.fpsDiv) != 0 {
 					continue
@@ -207,11 +245,50 @@ func (p *SubstreamPipeline) Run(ctx context.Context) {
 					uint32(p.opts.Width), uint32(p.opts.Height))
 				pts := uint64(time.Since(start).Milliseconds()) * 90
 				if err := p.enc.Encode(sub, pts); err != nil {
-					slog.Warn("substream: encode failed", "error", err)
+					consec++
+					if consec == 1 || consec%warnEveryN == 0 {
+						slog.Warn("substream: encode failed", "error", err, "consecutive", consec)
+					}
+					if consec >= failoverBudget {
+						p.failover(&consec)
+					}
+					continue
 				}
+				consec = 0
 			}
 		}
 	}()
+}
+
+// failover replaces a dead encoder (M2M → ffmpeg) or disables the
+// pipeline when the fallback is dead too. Runs on the Run goroutine.
+func (p *SubstreamPipeline) failover(consec *int) {
+	name := "<nil>"
+	if p.enc != nil {
+		name = p.enc.Name()
+		_ = p.enc.Close()
+		p.enc = nil
+	}
+	if p.onFallback {
+		p.disabled = true
+		*consec = 0
+		slog.Warn("substream: disabled — fallback encoder keeps failing",
+			"tried", name, "note", "sub endpoints will 404 until restart")
+		return
+	}
+	enc, err := p.openFallback()
+	if err != nil {
+		p.disabled = true
+		*consec = 0
+		slog.Warn("substream: disabled — encoder failed and no fallback available",
+			"tried", name, "error", err)
+		return
+	}
+	p.enc = enc
+	p.onFallback = true
+	*consec = 0
+	slog.Warn("substream: encoder failed repeatedly, switching to fallback",
+		"from", name, "to", enc.Name())
 }
 
 // Stop tears the pipeline down (idempotent; also triggered by ctx).
