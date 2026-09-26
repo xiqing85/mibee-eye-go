@@ -7,10 +7,71 @@ package web
 
 import (
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/xiqing85/mibee-eye-go/internal/h264"
 )
+
+// mseClock hands the fMP4 media timeline from one HTTP connection to the
+// next. Timestamps never restart at zero: a new connection seeds strictly
+// past every timestamp any earlier connection emitted, so a client that
+// transparently reconnects (Wi-Fi blip, proxy idle cut) can keep appending
+// to its existing SourceBuffer instead of tearing the decoder down — the
+// seamless-reconnect contract (SPEC §4.1).
+var (
+	mseClockMu    sync.Mutex
+	mseFloorTicks uint64
+)
+
+// seedMseClock returns the first timestamp for a new connection.
+func seedMseClock() uint64 {
+	mseClockMu.Lock()
+	defer mseClockMu.Unlock()
+	mseFloorTicks += 90
+	return mseFloorTicks
+}
+
+// publishMseClock advances the shared floor so later connections seed past
+// this one. No-op when ticks is behind a connection that raced ahead.
+func publishMseClock(ticks uint64) {
+	mseClockMu.Lock()
+	defer mseClockMu.Unlock()
+	if ticks > mseFloorTicks {
+		mseFloorTicks = ticks
+	}
+}
+
+// mseTimeline stamps one connection's frames on the shared media clock.
+type mseTimeline struct {
+	prev  time.Time
+	clock uint64
+}
+
+func newMseTimeline() *mseTimeline {
+	return &mseTimeline{clock: seedMseClock()}
+}
+
+// next returns this frame's timestamp (90 kHz ticks) and its duration.
+// Wall-clock interval → ticks keeps the timeline gapless and true-speed
+// regardless of sensor fps; long stalls clamp to 200 ms so server-side
+// realignment skips stay seamless for the decoder.
+func (m *mseTimeline) next(now time.Time) (timestamp, duration uint64) {
+	ticks := uint64(6000)
+	if !m.prev.IsZero() {
+		us := now.Sub(m.prev).Microseconds() * 90 / 1000
+		if us < 90 {
+			us = 90
+		} else if us > 18000 {
+			us = 18000
+		}
+		ticks = uint64(us)
+	}
+	m.prev = now
+	m.clock += ticks
+	publishMseClock(m.clock)
+	return m.clock, ticks
+}
 
 // realignTracker gates serialization after stream loss. A unit lost to a
 // full subscriber channel (or skipped while draining backlog) leaves a
@@ -40,6 +101,15 @@ func (rt *realignTracker) allow(au h264.AccessUnit, dropped uint64, drained bool
 	return true
 }
 
+// clearWriteDeadline opts a streaming response out of the server's global
+// http.Server.WriteTimeout (default 30s). Chunked streams (MSE, SSE) are
+// long-lived by design; leaving the deadline in place cuts them off 30s
+// into the response, which the live player surfaces as a black-flash
+// reconnect every 30 seconds.
+func clearWriteDeadline(w http.ResponseWriter) {
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
+}
+
 // handleStreamMSE streams H.264 as fMP4 over chunked HTTP.
 func (s *Server) handleStreamMSE(w http.ResponseWriter, r *http.Request, cameraID string) {
 	if cameraID != "0" {
@@ -56,6 +126,7 @@ func (s *Server) handleStreamMSE(w http.ResponseWriter, r *http.Request, cameraI
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
 		return
 	}
+	clearWriteDeadline(w)
 
 	w.Header().Set("Content-Type", "video/mp4")
 	w.Header().Set("Cache-Control", "no-store")
@@ -68,8 +139,7 @@ func (s *Server) handleStreamMSE(w http.ResponseWriter, r *http.Request, cameraI
 	initialized := false
 	rt := realignTracker{seenDrops: sub.Dropped()}
 	var sequence uint32
-	var prevFrame time.Time
-	var mediaClock uint64
+	tl := newMseTimeline()
 
 	for au := range sub.Channel {
 		select {
@@ -125,24 +195,11 @@ func (s *Server) handleStreamMSE(w http.ResponseWriter, r *http.Request, cameraI
 		}
 
 		// Wall-clock interval → 90 kHz ticks keeps the MSE timeline gapless
-		// and true-speed regardless of sensor fps.
-		now := time.Now()
-		duration := uint32(6000)
-		if !prevFrame.IsZero() {
-			us := now.Sub(prevFrame).Microseconds()
-			ticks := us * 90 / 1000
-			if ticks < 90 {
-				ticks = 90
-			} else if ticks > 18000 {
-				ticks = 18000
-			}
-			duration = uint32(ticks)
-		}
-		prevFrame = now
-		timestamp := mediaClock
-		mediaClock += uint64(duration)
+		// and true-speed regardless of sensor fps; the shared clock hands
+		// the timeline to the client's next (re)connection.
+		timestamp, duration := tl.next(time.Now())
 
-		seg := buildMediaSegment(nalus, sequence, timestamp, duration, au.KeyFrame)
+		seg := buildMediaSegment(nalus, sequence, timestamp, uint32(duration), au.KeyFrame)
 		sequence++
 		if _, err := w.Write(seg); err != nil {
 			return
