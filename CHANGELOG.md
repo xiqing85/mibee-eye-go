@@ -13,6 +13,23 @@ Notable changes to MiBee Eye (Go implementation) are documented here.
 
 ## [Unreleased]
 
+- **feat(substream): low-resolution bandwidth-saving substream**
+  (`camera.substream.*`, SPEC appendix A #20, default off): a boot-static
+  second encoder session (V4L2 M2M second open, ffmpeg fallback) fed by a
+  bounded, drop-on-full tap of the post-transform main capture frames —
+  640x360@15 / 400 kbps defaults. Exposed as the RTSP `/sub` mount
+  (per-mount gortsplib ServerStream + fail-open routing: every non-`/sub`
+  URL keeps the main stream), the ONVIF `sub` profile (GetStreamUri routes
+  by ProfileToken, main profile always first for the NVR) and the web
+  `GET /api/cameras/{id}/stream.sub.mse` + `capabilities.substream`.
+  Recording, GB28181 and AI stay on the main stream; substream config
+  changes require the full process restart (excluded from
+  `applied:"camera_restart"` eligibility). Only raw-pixel capture paths
+  can feed the tap — `v4l2` mode and `rpicamvid` rotation 90/270;
+  enabling it elsewhere warns and disables (fail-open).
+- `internal/camera/downscale.go`: nearest-neighbour I420 downscaler, Go
+  twin of mibee-eye-rs `camera/downscale.rs` (same no-op guarantees).
+
 - **Device-level rotation baked into the stream** (SPEC v1 appendix A
   #19): new `camera.rotation` key (0 | 90 | 180 | 270, clockwise
   degrees) rotates the stream for every consumer — RTSP, ONVIF, GB28181,

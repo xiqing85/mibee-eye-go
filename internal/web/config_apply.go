@@ -31,6 +31,12 @@ func cameraRestartEligible(oldCfg, newCfg config.CameraConfig) bool {
 	if oldCfg.FPS != newCfg.FPS || oldCfg.Bitrate != newCfg.Bitrate || oldCfg.Codec != newCfg.Codec {
 		return false
 	}
+	if oldCfg.Substream != newCfg.Substream {
+		// The substream pipeline (second encoder session, hub wiring,
+		// ONVIF profile) is boot-static — reshaping it needs the full
+		// process restart.
+		return false
+	}
 	ow, oh := camera.RotatedDims(oldCfg.Width, oldCfg.Height, oldCfg.Rotation)
 	nw, nh := camera.RotatedDims(newCfg.Width, newCfg.Height, newCfg.Rotation)
 	return ow == nw && oh == nh

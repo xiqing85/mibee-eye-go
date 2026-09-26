@@ -931,3 +931,57 @@ func TestDetectDeviceSerialOnProbeableHost(t *testing.T) {
 		t.Fatal("expected a probeable device serial (cpuinfo Serial or machine-id) on this host")
 	}
 }
+
+func TestSubstreamDefaults(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.Camera.Substream.Enabled {
+		t.Fatal("substream must default to disabled")
+	}
+	if cfg.Camera.Substream.Width != 640 || cfg.Camera.Substream.Height != 360 {
+		t.Fatalf("substream default dims = %dx%d, want 640x360", cfg.Camera.Substream.Width, cfg.Camera.Substream.Height)
+	}
+	if cfg.Camera.Substream.FPS != 0 || cfg.Camera.Substream.Bitrate != 400_000 {
+		t.Fatalf("substream defaults fps/bitrate = %d/%d", cfg.Camera.Substream.FPS, cfg.Camera.Substream.Bitrate)
+	}
+}
+
+func TestSubstreamPartialYAMLMergesDefaults(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	yaml := "camera:\n  substream:\n    enabled: true\n"
+	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.Camera.Substream.Enabled {
+		t.Fatal("enabled must parse")
+	}
+	if cfg.Camera.Substream.Width != 640 || cfg.Camera.Substream.Bitrate != 400_000 {
+		t.Fatalf("unset sub keys must keep defaults, got %+v", cfg.Camera.Substream)
+	}
+	if fps := cfg.Camera.Substream.EffectiveFPS(15); fps != 15 {
+		t.Fatalf("fps=0 must follow main fps, got %d", fps)
+	}
+}
+
+func TestSubstreamValidateRejectsOddDims(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Camera.Substream.Enabled = true
+	cfg.Camera.Substream.Width = 641
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("odd substream width must be rejected")
+	}
+}
+
+func TestSubstreamValidateRejectsUpscale(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Camera.Substream.Enabled = true
+	cfg.Camera.Substream.Width = 1280
+	cfg.Camera.Substream.Height = 800
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("substream larger than the main stream must be rejected")
+	}
+}

@@ -52,8 +52,10 @@ type Server struct {
 // New builds the composed server. advertiseIP is the device's own IP used
 // verbatim as the host of every advertised URL (XAddrs, capabilities,
 // stream/snapshot URIs); params and snapshot back the Imaging service and
-// the /snapshot endpoint respectively.
-func New(cfg *config.Config, advertiseIP string, params *camera.ParamManager, snapshot *onvif.SnapshotBuffer) (*Server, error) {
+// the /snapshot endpoint respectively. sub, when non-nil, adds the
+// low-resolution substream as the second media profile (token `sub`,
+// GetStreamUri routes it to the RTSP /sub mount — SPEC appendix A #20).
+func New(cfg *config.Config, advertiseIP string, params *camera.ParamManager, snapshot *onvif.SnapshotBuffer, sub *camera.SubstreamInfo) (*Server, error) {
 	s := &Server{
 		cfg:         cfg,
 		snapshot:    snapshot,
@@ -83,7 +85,7 @@ func New(cfg *config.Config, advertiseIP string, params *camera.ParamManager, sn
 		// Pull-Point events service (AI MotionAlarm; key gates the
 		// GetCapabilities XAddr advertisement too).
 		SupportEvents: cfg.ONVIF.EventsEnabled,
-		Profiles:      []onvifserver.ProfileConfig{profileFromConfig(cfg)},
+		Profiles:      profilesFromConfig(cfg, sub),
 		// GetScopes answers these (#37). Superset of the discovery scopes:
 		// ProbeMatches carries only name+hardware (byte-stable for the NVR),
 		// GetScopes additionally advertises the encoder type.
@@ -279,6 +281,46 @@ func (s *Server) Stop() error {
 		return nil
 	}
 	return s.httpServer.Close()
+}
+
+// profilesFromConfig lists the primary profile first (the NVR
+// auto-selects the first profile), then the substream profile when the
+// pipeline actually started.
+func profilesFromConfig(cfg *config.Config, sub *camera.SubstreamInfo) []onvifserver.ProfileConfig {
+	profiles := []onvifserver.ProfileConfig{profileFromConfig(cfg)}
+	if sub != nil {
+		profiles = append(profiles, onvifserver.ProfileConfig{
+			Token: "sub",
+			Name:  "sub",
+			VideoSource: onvifserver.VideoSourceConfig{
+				Token: "videoSrc0",
+				Name:  "videoSrc0",
+				Resolution: onvifserver.Resolution{
+					Width:  sub.Width,
+					Height: sub.Height,
+				},
+				Framerate: sub.FPS,
+				Bounds: onvifserver.Bounds{
+					X:      0,
+					Y:      0,
+					Width:  sub.Width,
+					Height: sub.Height,
+				},
+			},
+			VideoEncoder: onvifserver.VideoEncoderConfig{
+				Encoding: "H264",
+				Resolution: onvifserver.Resolution{
+					Width:  sub.Width,
+					Height: sub.Height,
+				},
+				Quality:   80,
+				Framerate: sub.FPS,
+				Bitrate:   sub.Bitrate,
+				GovLength: sub.FPS * 2,
+			},
+		})
+	}
+	return profiles
 }
 
 // profileFromConfig builds the single media profile advertised by

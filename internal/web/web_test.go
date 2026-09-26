@@ -15,6 +15,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/xiqing85/mibee-eye-go/internal/h264"
 )
 
 // newSpecServer builds a Server with the shared mock OnVIF config and the
@@ -433,5 +435,62 @@ func TestSystemRestartEndpoint(t *testing.T) {
 	caps := decode(t, rec)["data"].(map[string]interface{})
 	if caps["restart"] != true {
 		t.Fatalf("capabilities.restart must be true, got %v", caps["restart"])
+	}
+}
+
+// TestSubstreamCapabilityAndEndpoint (SPEC appendix A #20): the sub MSE
+// endpoint and the capability flag follow the sub hub being wired.
+func TestSubstreamCapabilityAndEndpoint(t *testing.T) {
+	s := newSpecServer("admin", "spec-pass-1")
+	cookie, _ := specLogin(t, s)
+
+	// Capability false without a sub hub.
+	rec := doReq(t, s, http.MethodGet, "/api/capabilities", "", map[string]string{"Cookie": cookie})
+	caps := decode(t, rec)["data"].(map[string]interface{})
+	if caps["substream"] != false {
+		t.Fatalf("substream capability must be false without a sub hub, got %v", caps["substream"])
+	}
+	rec = doReq(t, s, http.MethodGet, "/api/cameras/0/stream.sub.mse", "", map[string]string{"Cookie": cookie})
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("sub endpoint must 404 without a sub hub, got %d", rec.Code)
+	}
+
+	// With a sub hub: capability true, endpoint serves video/mp4.
+	hub := h264.NewAUHub()
+	s.cfg.SubAUHub = hub
+	s.cfg.SubstreamDims = func() (uint32, uint32) { return 640, 360 }
+
+	rec = doReq(t, s, http.MethodGet, "/api/capabilities", "", map[string]string{"Cookie": cookie})
+	caps = decode(t, rec)["data"].(map[string]interface{})
+	if caps["substream"] != true {
+		t.Fatalf("substream capability must follow the sub hub, got %v", caps["substream"])
+	}
+
+	// The sub endpoint is a live chunked stream: drive it through the mux
+	// with a bounded request context so the handler's hub subscription
+	// releases when the context expires (a bare recorder never
+	// disconnects, and the handler would stream forever).
+	s.mux = http.NewServeMux()
+	s.registerRoutes()
+	reqCtx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer cancel()
+	req := httptest.NewRequest(http.MethodGet, "/api/cameras/0/stream.sub.mse", nil).WithContext(reqCtx)
+	req.Header.Set("cookie", cookie)
+	rec = httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		s.mux.ServeHTTP(rec, req)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("sub endpoint handler did not return after request context expiry")
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("sub endpoint must serve with a sub hub, got %d", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "video/mp4" {
+		t.Fatalf("sub endpoint content-type = %q", ct)
 	}
 }
