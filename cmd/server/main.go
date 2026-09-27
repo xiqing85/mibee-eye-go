@@ -158,7 +158,7 @@ func (a *configAdapter) CameraCodec() string   { return a.cfg.Camera.Codec }
 // params (config → defaults), CameraInfo, and the mode switch. Extracted
 // so the in-place camera restart (SPEC §5 applied:"camera_restart") can
 // rebuild the pipeline from freshly loaded config with identical logic.
-func buildCameraFromConfig(cfg *config.Config, subTap func(frame []byte, w, h uint32)) (camera.Camera, string) {
+func buildCameraFromConfig(cfg *config.Config, subTap func(frame []byte, w, h uint32), aiTap func(frame []byte, w, h uint32)) (camera.Camera, string) {
 	cameraParams := camera.DefaultParams()
 	cameraParams.Width = uint32(cfg.Camera.Width)
 	cameraParams.Height = uint32(cfg.Camera.Height)
@@ -218,6 +218,9 @@ func buildCameraFromConfig(cfg *config.Config, subTap func(frame []byte, w, h ui
 			// path, which has no in-process frames.
 			vidOpts = append(vidOpts, camera.WithVidSubstream(subTap))
 		}
+		if aiTap != nil {
+			vidOpts = append(vidOpts, camera.WithVidAITap(aiTap))
+		}
 		cam = camera.NewRPiCamVidCamera(vidOpts...)
 
 	case "v4l2":
@@ -237,6 +240,9 @@ func buildCameraFromConfig(cfg *config.Config, subTap func(frame []byte, w, h ui
 		}
 		if subTap != nil {
 			v4l2Opts = append(v4l2Opts, camera.WithV4L2Substream(subTap))
+		}
+		if aiTap != nil {
+			v4l2Opts = append(v4l2Opts, camera.WithV4L2AITap(aiTap))
 		}
 		cam = camera.NewV4L2Source(v4l2Opts...)
 	default:
@@ -353,7 +359,21 @@ func main() {
 	if subPipeline != nil {
 		subTap = subPipeline.Tap
 	}
-	built, externalRTSPURL := buildCameraFromConfig(cfg, subTap)
+	// AI direct-YUV source (before the camera build — the tap must exist
+	// to install). Only the in-process frame paths can feed it: v4l2
+	// capture, or rpicam-vid's 90°/270° raw-YUV rotation pipeline. Every
+	// other mode keeps the ffmpeg keyframe decoder on the AUHub.
+	var aiYUVSource *ai.YUVSource
+	var aiTap func(frame []byte, w, h uint32)
+	if cfg.AI.Enabled {
+		inProcess := cfg.Camera.Mode == "v4l2" ||
+			(cfg.Camera.Mode == "rpicamvid" && (cfg.Camera.Rotation == 90 || cfg.Camera.Rotation == 270))
+		if inProcess {
+			aiYUVSource = ai.NewYUVSource(time.Duration(cfg.AI.IntervalMs) * time.Millisecond)
+			aiTap = aiYUVSource.Tap
+		}
+	}
+	built, externalRTSPURL := buildCameraFromConfig(cfg, subTap, aiTap)
 
 	// In-place camera restarts (SPEC §5 applied:"camera_restart"): the
 	// wrapper exposes a stable Frames() channel, so geometry-preserving
@@ -364,7 +384,7 @@ func main() {
 		if err != nil {
 			return nil, err
 		}
-		c, _ := buildCameraFromConfig(fresh, subTap)
+		c, _ := buildCameraFromConfig(fresh, subTap, aiTap)
 		return c, nil
 	}
 	restr := camera.NewRestartable(ctx, built, cameraFactory)
@@ -485,14 +505,15 @@ func main() {
 	}
 
 	// --- Step 2.5: AI detection (SPEC v1 §4.6; fail-open) ---
-	// Taps the AUHub (passive — never the capture/encode path): an ffmpeg
-	// subprocess decodes keyframes, ONNX Runtime runs NanoDet inference.
-	// NewService returns nil when disabled or unavailable.
+	// In-process frame paths feed inference through the direct YUV tap
+	// (no ffmpeg decode); everything else decodes AUHub keyframes in an
+	// ffmpeg subprocess. NewService* returns nil when disabled or
+	// unavailable.
 	ai.InitRegistry("/var/lib/mibee-eye/models")
 	// Post-rotation stream resolution (SPEC appendix A #19) — the AI
 	// detection bbox space uses the effective dims.
 	effW, effH := cfg.Camera.EffectiveDims()
-	aiService := ai.NewService(ai.Options{
+	aiOpts := ai.Options{
 		Enabled:             cfg.AI.Enabled,
 		Model:               cfg.AI.Model,
 		ModelPath:           cfg.AI.ModelPath,
@@ -502,7 +523,13 @@ func main() {
 		DecoderBin:          cfg.AI.DecoderBin,
 		VideoW:              uint32(effW),
 		VideoH:              uint32(effH),
-	}, auHub, ai.NewDetector)
+	}
+	var aiService *ai.Service
+	if aiYUVSource != nil {
+		aiService = ai.NewServiceWithSource(aiOpts, aiYUVSource, ai.NewDetector)
+	} else {
+		aiService = ai.NewService(aiOpts, auHub, ai.NewDetector)
+	}
 	// AI → alarm fan-out bridge (GB NOTIFY §9.5 + SPEC §6 SSE alarm +
 	// ONVIF MotionAlarm): exists whenever AI runs; the GB sender is
 	// attached once the GB server exists (Step 6.5) and the ONVIF sink

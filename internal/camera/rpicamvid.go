@@ -71,6 +71,11 @@ type RPiCamVidCamera struct {
 	// the H.264 direct path, which has no in-process frames to downscale.
 	subTap func(frame []byte, w, h uint32)
 
+	// AI tap: hands the same post-transform I420 frames to the in-process
+	// YUV frame source (direct inference input, no ffmpeg round trip).
+	// Same yuvMode-only constraint as subTap.
+	aiTap func(frame []byte, w, h uint32)
+
 	// Rotation pipeline (yuvMode = rotation 90/270): encoder plumbing for
 	// the Go-side transform path, mirroring V4L2Source.
 	yuvMode       bool
@@ -128,6 +133,14 @@ func WithVidFFmpegBin(bin string) RPiCamVidOption {
 // Start.
 func WithVidSubstream(tap func(frame []byte, w, h uint32)) RPiCamVidOption {
 	return func(c *RPiCamVidCamera) { c.subTap = tap }
+}
+
+// WithVidAITap installs the AI frame tap (direct YUV inference input).
+// Only the 90°/270° raw-YUV pipeline can feed it; on the H.264 direct
+// path the tap is dropped with a warning at Start and the AI service
+// falls back to the ffmpeg keyframe decoder.
+func WithVidAITap(tap func(frame []byte, w, h uint32)) RPiCamVidOption {
+	return func(c *RPiCamVidCamera) { c.aiTap = tap }
 }
 
 // WithVidFrameBufferSize sets the frame channel buffer capacity.
@@ -214,6 +227,11 @@ func (c *RPiCamVidCamera) Start(ctx context.Context) error {
 		slog.Warn("camera: substream requested but the rpicam-vid H.264 direct path " +
 			"(rotation 0/180) has no in-process frames — substream disabled")
 		c.subTap = nil
+	}
+	if c.aiTap != nil && !c.yuvMode {
+		slog.Warn("camera: AI YUV tap requested but the rpicam-vid H.264 direct path " +
+			"(rotation 0/180) has no in-process frames — AI falls back to ffmpeg decode")
+		c.aiTap = nil
 	}
 	if c.yuvMode {
 		if err := c.resolveYuvEncoder(); err != nil {
@@ -553,6 +571,10 @@ func (c *RPiCamVidCamera) readLoopYUV() {
 		// the main encode. Non-blocking; a slow sub pipeline drops frames.
 		if c.subTap != nil {
 			c.subTap(frame, uint32(fw), uint32(fh))
+		}
+		// AI tap: same post-transform frame, direct inference input.
+		if c.aiTap != nil {
+			c.aiTap(frame, uint32(fw), uint32(fh))
 		}
 		pts := uint64(time.Since(start).Milliseconds()) * 90
 		if err := c.yuvEncoder.Encode(frame, pts); err != nil {

@@ -106,3 +106,77 @@ func TestMapAxisNeverExceedsSource(t *testing.T) {
 		t.Fatalf("mapAxis(2,4) = %v, want [0 2]", got)
 	}
 }
+
+func TestDownscaleYU12IntoMatchesAllocatingForm(t *testing.T) {
+	src := make([]byte, 16*12*3/2)
+	for i := range src {
+		src[i] = byte(i * 5)
+	}
+	cases := [][4]uint32{{8, 6, 16, 12}, {16, 12, 16, 12}, {8, 6, 8, 12}, {20, 12, 16, 12}}
+	for _, c := range cases {
+		want := DownscaleYU12(src, 16, 12, c[0], c[1])
+		got := DownscaleYU12Into(nil, src, 16, 12, c[0], c[1])
+		if len(got) != len(want) {
+			t.Fatalf("dims %dx%d: len %d, want %d", c[0], c[1], len(got), len(want))
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("dims %dx%d: byte %d = %d, want %d", c[0], c[1], i, got[i], want[i])
+			}
+		}
+	}
+}
+
+func TestDownscaleYU12IntoReusesRoomyBuffer(t *testing.T) {
+	src := make([]byte, 16*12*3/2)
+	for i := range src {
+		src[i] = byte(i)
+	}
+	buf := make([]byte, 256)
+	got := DownscaleYU12Into(buf[:0], src, 16, 12, 8, 6)
+	if &got[0] != &buf[0] {
+		t.Fatal("roomy dst must be reused, not reallocated")
+	}
+	if len(got) != 8*6*3/2 {
+		t.Fatalf("len = %d, want %d", len(got), 8*6*3/2)
+	}
+	// Never aliases src: mutating the result must leave src untouched.
+	got[0] ^= 0xFF
+	if src[0] == got[0] {
+		t.Fatal("result must not alias the source buffer")
+	}
+}
+
+func TestDownscaleYU12IntoGrowsTooSmallBuffer(t *testing.T) {
+	src := make([]byte, 16*12*3/2)
+	for i := range src {
+		src[i] = byte(i)
+	}
+	buf := make([]byte, 4)
+	got := DownscaleYU12Into(buf, src, 16, 12, 8, 6)
+	if len(got) != 8*6*3/2 || cap(got) <= 4 {
+		t.Fatalf("small dst must grow: len %d cap %d", len(got), cap(got))
+	}
+	want := DownscaleYU12(src, 16, 12, 8, 6)
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("byte %d = %d, want %d", i, got[i], want[i])
+		}
+	}
+}
+
+func TestDownscaleYU12IntoIdentityPassThroughCopies(t *testing.T) {
+	src := make([]byte, 16*12*3/2)
+	for i := range src {
+		src[i] = byte(i * 3)
+	}
+	got := DownscaleYU12Into(nil, src, 16, 12, 16, 12)
+	if &got[0] == &src[0] {
+		t.Fatal("identity path must copy, not alias src")
+	}
+	for i := range src {
+		if got[i] != src[i] {
+			t.Fatalf("identity byte %d = %d, want %d", i, got[i], src[i])
+		}
+	}
+}

@@ -57,6 +57,10 @@ type V4L2Source struct {
 	// disables it.
 	subTap func(frame []byte, w, h uint32)
 
+	// AI tap: same post-transform frames, direct inference input (the
+	// in-process YUV frame source; no ffmpeg round trip).
+	aiTap func(frame []byte, w, h uint32)
+
 	// Device-level transform state (SPEC appendix A #9/#19), applied to
 	// every frame in pump() before encoding — baked into the stream for
 	// every consumer. Rotation is boot-static; flips read per frame so
@@ -121,6 +125,12 @@ func WithV4L2Rotation(degrees int) V4L2Option {
 // WithV4L2Substream installs the substream tap (SPEC appendix A #20).
 func WithV4L2Substream(tap func(frame []byte, w, h uint32)) V4L2Option {
 	return func(s *V4L2Source) { s.subTap = tap }
+}
+
+// WithV4L2AITap installs the AI frame tap (direct YUV inference input,
+// same post-transform frames as the substream tap).
+func WithV4L2AITap(tap func(frame []byte, w, h uint32)) V4L2Option {
+	return func(s *V4L2Source) { s.aiTap = tap }
 }
 
 // WithV4L2Probe overrides the encoder-node probe (tests).
@@ -355,6 +365,10 @@ func (s *V4L2Source) pump() {
 		// the main encode. Non-blocking; a slow sub pipeline drops frames.
 		if s.subTap != nil {
 			s.subTap(yuv, uint32(fw), uint32(fh))
+		}
+		// AI tap: same post-transform frame, direct inference input.
+		if s.aiTap != nil {
+			s.aiTap(yuv, uint32(fw), uint32(fh))
 		}
 		count++
 		pts := uint64(time.Since(start).Milliseconds()) * 90
