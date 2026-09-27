@@ -357,3 +357,53 @@ func TestSubstreamFailureWarnsAreRateLimited(t *testing.T) {
 		t.Fatalf("WARN records = %d, want 4 (rate-limited); got %q", got, h.warnMessages())
 	}
 }
+
+// TestSubstreamPipelineFractionalDecimation: 15→10fps keeps 2 of every 3
+// frames (integer division alone silently kept all 15 — the fps:10 config
+// on the deployed .161 did nothing until this).
+func TestSubstreamPipelineFractionalDecimation(t *testing.T) {
+	enc := &recordingEncoder{done: make(chan struct{}, 32)}
+	p := newTestPipeline(t, SubstreamOptions{
+		SrcW: 8, SrcH: 4, Width: 4, Height: 2,
+		FPs: 10, Bitrate: 400_000, MainFPS: 15,
+	}, enc)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	p.Run(ctx)
+	defer p.Stop()
+
+	frame := frame8x4()
+	for tag := byte(1); tag <= 6; tag++ {
+		for i := range frame {
+			if i < 32 {
+				frame[i] = tag
+			}
+		}
+		p.Tap(frame, 8, 4)
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	deadline := time.After(3 * time.Second)
+	for enc.count() < 4 {
+		select {
+		case <-enc.done:
+		case <-deadline:
+			t.Fatalf("timed out waiting for encodes, got %d (want 4 of 6)", enc.count())
+		}
+	}
+	time.Sleep(100 * time.Millisecond)
+	if got := enc.count(); got != 4 {
+		t.Fatalf("15→10fps must encode 4 of 6 frames, got %d", got)
+	}
+	// Pattern check: with period=3 keep=2 the dropped tags are 2 and 5.
+	for i, want := range []byte{1, 3, 4, 6} {
+		if enc.frame(i)[0] != want {
+			t.Fatalf("encoded tags = %d,%d,%d,%d, want 1,3,4,6",
+				enc.frame(0)[0], enc.frame(1)[0], enc.frame(2)[0], enc.frame(3)[0])
+		}
+	}
+	if info := p.Info(); info.FPS != 10 {
+		t.Fatalf("Info fps = %d, want 10", info.FPS)
+	}
+}
