@@ -146,7 +146,7 @@ func NewSubstreamPipeline(o SubstreamOptions) (*SubstreamPipeline, error) {
 			fp.Width, fp.Height = uint32(o.Width), uint32(o.Height)
 			fp.FPS = float32(subFPS)
 			fp.Bitrate = uint32(o.Bitrate)
-			return newFFmpegEncoder(o.FFmpegBin, fp, emit)
+			return newSubstreamFFmpegEncoder(o.FFmpegBin, fp, emit)
 		}
 	}
 	if res, err := probe(o.EncoderDevice); err == nil && res.M2MCapable {
