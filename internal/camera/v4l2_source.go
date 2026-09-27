@@ -430,24 +430,48 @@ type ffmpegEncoder struct {
 	wg     sync.WaitGroup
 }
 
-func newFFmpegEncoder(bin string, p Params, onAU func(nalus []h264.NALU, key bool)) (*ffmpegEncoder, error) {
+// ffmpegEncoderArgs builds the libx264 subprocess argument vector. The
+// preset is a parameter so the substream runtime fallback can trade
+// quality for CPU ("ultrafast" — the fallback only runs when the hardware
+// encoder is unavailable, and a Pi 3B has no cycles to spare there) while
+// the probe-time fallback keeps the quality-oriented default.
+func ffmpegEncoderArgs(p Params, preset string) []string {
 	gop := uint32(30)
 	if p.FPS > 1 {
 		gop = uint32(p.FPS) * 2 // IDR every ~2s, matching the Rust twin
 	}
-	cmd := exec.Command(bin,
+	if preset == "" {
+		preset = "veryfast"
+	}
+	return []string{
 		"-hide_banner", "-loglevel", "error",
 		"-f", "rawvideo", "-pix_fmt", "yuv420p",
 		"-s", fmt.Sprintf("%dx%d", uint32(p.Width), uint32(p.Height)),
 		"-r", fmt.Sprintf("%g", p.FPS),
 		"-i", "pipe:0",
-		"-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency",
+		"-c:v", "libx264", "-preset", preset, "-tune", "zerolatency",
 		"-profile:v", "baseline",
 		"-pix_fmt", "yuv420p",
 		"-b:v", fmt.Sprintf("%d", uint32(p.Bitrate)),
 		"-g", fmt.Sprintf("%d", gop),
 		"-f", "h264", "pipe:1",
-	)
+	}
+}
+
+func newFFmpegEncoder(bin string, p Params, onAU func(nalus []h264.NALU, key bool)) (*ffmpegEncoder, error) {
+	return newFFmpegEncoderWithPreset(bin, p, onAU, "")
+}
+
+// newSubstreamFFmpegEncoder builds the substream RUNTIME fallback with the
+// CPU-cheap preset — it only runs when the hardware encoder wedged, and a
+// Pi has no cycles to spare there (the libx264 subprocess cost ~52% of a
+// core at veryfast/360p15 during the .161 incident).
+func newSubstreamFFmpegEncoder(bin string, p Params, onAU func(nalus []h264.NALU, key bool)) (*ffmpegEncoder, error) {
+	return newFFmpegEncoderWithPreset(bin, p, onAU, "ultrafast")
+}
+
+func newFFmpegEncoderWithPreset(bin string, p Params, onAU func(nalus []h264.NALU, key bool), preset string) (*ffmpegEncoder, error) {
+	cmd := exec.Command(bin, ffmpegEncoderArgs(p, preset)...)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, fmt.Errorf("ffmpeg stdin: %w", err)

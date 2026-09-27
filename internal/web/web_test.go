@@ -9,6 +9,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -492,5 +494,101 @@ func TestSubstreamCapabilityAndEndpoint(t *testing.T) {
 	}
 	if ct := rec.Header().Get("Content-Type"); ct != "video/mp4" {
 		t.Fatalf("sub endpoint content-type = %q", ct)
+	}
+}
+
+// TestStreamMSEReleasesStalledClient (write-deadline hardening): an MSE
+// client that stops reading but keeps the socket open fills the server's
+// TCP send buffer; without a per-write deadline the handler blocks in
+// Write forever while its hub subscription starves. The handler must exit
+// (~10s write deadline) and release the subscription.
+func TestStreamMSEReleasesStalledClient(t *testing.T) {
+	s := newSpecServer("admin", "spec-pass-9")
+	hub := h264.NewAUHub()
+	s.cfg.SubAUHub = hub
+	s.cfg.SubstreamDims = func() (uint32, uint32) { return 640, 360 }
+	s.mux = http.NewServeMux()
+	s.registerRoutes()
+	ts := httptest.NewServer(s.mux)
+	defer ts.Close()
+
+	// Feed keyframe AUs with fat payloads so the send buffer fills fast.
+	feed := make(chan struct{})
+	go func() {
+		payload := make([]byte, 8*1024) // large non-IDR slice payload
+		for i := range payload {
+			payload[i] = byte(i)
+		}
+		tk := time.NewTicker(20 * time.Millisecond)
+		defer tk.Stop()
+		for {
+			select {
+			case <-feed:
+				return
+			case <-tk.C:
+				hub.Write(h264.AccessUnit{
+					NALUs: []h264.NALU{
+						{Type: 7, Data: []byte{0x67, 1, 2, 3}, IsSPS: true},
+						{Type: 8, Data: []byte{0x68, 1, 2}, IsPPS: true},
+						{Type: 5, Data: append([]byte{0x65}, payload...), IsIDR: true},
+					},
+					Timestamp: time.Now(),
+					KeyFrame:  true,
+				})
+			}
+		}
+	}()
+	defer close(feed)
+
+	// Login over real HTTP (JSON body per SPEC §2), then open the sub
+	// stream and stop reading without closing the connection.
+	login, err := http.Post(ts.URL+"/api/auth/login",
+		"application/json",
+		strings.NewReader(`{"username":"admin","password":"spec-pass-9"}`))
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	login.Body.Close()
+	var session string
+	for _, c := range login.Cookies() {
+		if c.Name == "session" {
+			session = c.Value
+		}
+	}
+	if session == "" {
+		t.Fatal("login must issue a session cookie")
+	}
+
+	conn, err := net.Dial("tcp", ts.Listener.Addr().String())
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+	req := "GET /api/cameras/0/stream.sub.mse HTTP/1.1\r\nHost: t\r\nCookie: session=" + session + "\r\n\r\n"
+	if _, err := conn.Write([]byte(req)); err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	buf := make([]byte, 512)
+	if _, err := io.ReadFull(conn, buf); err != nil { // headers + start of body
+		t.Fatalf("read headers: %v", err)
+	}
+	// Socket stays OPEN but never read again — the server's send buffer
+	// fills and Write would block forever without the deadline.
+
+	if n := hub.SubscriberCount(); n != 1 {
+		t.Fatalf("expected 1 subscriber mid-stream, got %d", n)
+	}
+	deadline := time.After(20 * time.Second)
+	tick := time.NewTicker(200 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		select {
+		case <-deadline:
+			t.Fatalf("stalled client's subscription never released (count=%d)", hub.SubscriberCount())
+		case <-tick.C:
+			if hub.SubscriberCount() == 0 {
+				return // handler exited via write deadline → unsubscribed
+			}
+		}
 	}
 }

@@ -4,6 +4,7 @@ package v4l2
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"syscall"
@@ -68,6 +69,14 @@ func copyPaddedI420(dst, src []byte, w, h, stride uint32) int {
 }
 
 const annexbStartCode = "\x00\x00\x00\x01"
+
+// bufferCount resolves the effective per-queue buffer count (0 → 4).
+func (o M2MEncoderOptions) bufferCount() uint32 {
+	if o.BufferCount > 0 {
+		return o.BufferCount
+	}
+	return 4
+}
 
 // OpenM2MEncoder opens `path` and configures an H.264 encoder for
 // YUV420 input at w×h with the given best-effort controls. Unsupported
@@ -138,21 +147,24 @@ func OpenM2MEncoder(path string, width, height uint32, opts M2MEncoderOptions) (
 	setCtrl := func(id uint32, value int32) {
 		_ = setExtCtrl(file.Fd(), id, value)
 	}
-	if opts.Bitrate > 0 {
-		setCtrl(cidVideoBitrate, opts.Bitrate)
-	}
-	if opts.IPeriod > 0 {
-		e.iPeriod = uint32(opts.IPeriod)
-		setCtrl(cidVideoH264IPeriod, opts.IPeriod)
-		setCtrl(cidVideoGopSize, opts.IPeriod)
-		setCtrl(cidVideoRepeatSeqHeader, 1)
-	} else if opts.RepeatSeqHeader {
-		setCtrl(cidVideoRepeatSeqHeader, 1)
+	if !opts.NoExtControls {
+		if opts.Bitrate > 0 {
+			setCtrl(cidVideoBitrate, opts.Bitrate)
+		}
+		if opts.IPeriod > 0 {
+			e.iPeriod = uint32(opts.IPeriod)
+			setCtrl(cidVideoH264IPeriod, opts.IPeriod)
+			setCtrl(cidVideoGopSize, opts.IPeriod)
+			setCtrl(cidVideoRepeatSeqHeader, 1)
+		} else if opts.RepeatSeqHeader {
+			setCtrl(cidVideoRepeatSeqHeader, 1)
+		}
 	}
 
+	bufs := opts.bufferCount()
 	var errOut, errCap error
-	e.outputBufs, errOut = e.setupQueue(BufTypeVideoOutputMplane, 4)
-	e.capBufs, errCap = e.setupQueue(BufTypeVideoCaptureMplane, 4)
+	e.outputBufs, errOut = e.setupQueue(BufTypeVideoOutputMplane, bufs)
+	e.capBufs, errCap = e.setupQueue(BufTypeVideoCaptureMplane, bufs)
 	if errOut != nil {
 		e.Close()
 		return nil, errOut
@@ -235,15 +247,66 @@ func (e *M2MEncoder) bufferFor(bufType uint32, index uint32) []byte {
 	return e.capBufs[index]
 }
 
+// errEncodeUsage marks Encode failures caused by the caller (closed
+// encoder, short frame, bad geometry) — a queue reset cannot help those.
+var errEncodeUsage = errors.New("v4l2: encoder usage error")
+
 // Encode compresses one I420 frame and returns the H.264 Annex-B bytes
 // for that frame (may contain several NALUs, SPS/PPS on keyframes).
+//
+// Transport-level failures (poll timeout under CPU starvation, QBUF
+// EINVAL after a desync) trigger one queue reset and a retry of the same
+// frame: the sync single-frame dance leaves an OUTPUT buffer driver-owned
+// on any mid-flight error, and every later QBUF then fails with EINVAL
+// forever. The .161 "dual-instance starvation" was exactly one such
+// wedge — the driver handles concurrent sessions fine (verified with a
+// standalone dual-instance harness); a single scheduling hiccup wedged
+// the loop permanently.
 func (e *M2MEncoder) Encode(yuv []byte) ([]byte, error) {
+	au, err := e.encodeOnce(yuv)
+	if err == nil || errors.Is(err, errEncodeUsage) {
+		return au, err
+	}
+	if rerr := e.resetQueues(); rerr != nil {
+		return nil, fmt.Errorf("v4l2: encoder wedged (%v); queue reset failed: %w", err, rerr)
+	}
+	return e.encodeOnce(yuv)
+}
+
+// resetQueues unwedges the encoder: STREAMOFF both queues (the driver
+// returns every in-flight buffer), requeue the CAPTURE pool, STREAMON
+// again. Mappings survive STREAMOFF — no REQBUFS/mmap round-trip.
+func (e *M2MEncoder) resetQueues() error {
+	offOut := int32(BufTypeVideoOutputMplane)
+	offCap := int32(BufTypeVideoCaptureMplane)
+	if err := ioctl(e.file.Fd(), vidiocStreamoff, unsafe.Pointer(&offOut)); err != nil {
+		return fmt.Errorf("STREAMOFF(output): %w", err)
+	}
+	if err := ioctl(e.file.Fd(), vidiocStreamoff, unsafe.Pointer(&offCap)); err != nil {
+		return fmt.Errorf("STREAMOFF(capture): %w", err)
+	}
+	for i := range e.capBufs {
+		if err := e.queueBuffer(BufTypeVideoCaptureMplane, uint32(i), 0); err != nil {
+			return fmt.Errorf("requeue capture %d: %w", i, err)
+		}
+	}
+	if err := ioctl(e.file.Fd(), vidiocStreamon, unsafe.Pointer(&offCap)); err != nil {
+		return fmt.Errorf("STREAMON(capture): %w", err)
+	}
+	if err := ioctl(e.file.Fd(), vidiocStreamon, unsafe.Pointer(&offOut)); err != nil {
+		return fmt.Errorf("STREAMON(output): %w", err)
+	}
+	e.nextOut = 0
+	return nil
+}
+
+func (e *M2MEncoder) encodeOnce(yuv []byte) ([]byte, error) {
 	if e.closed {
-		return nil, fmt.Errorf("v4l2: encoder closed")
+		return nil, fmt.Errorf("%w: encoder closed", errEncodeUsage)
 	}
 	want := e.width * e.height * 3 / 2
 	if uint32(len(yuv)) < want {
-		return nil, fmt.Errorf("v4l2: short frame: got %d bytes, need %d", len(yuv), want)
+		return nil, fmt.Errorf("%w: short frame: got %d bytes, need %d", errEncodeUsage, len(yuv), want)
 	}
 
 	// Press FORCE_KEY_FRAME every iPeriod frames (button control —
@@ -257,7 +320,7 @@ func (e *M2MEncoder) Encode(yuv []byte) ([]byte, error) {
 	out := e.outputBufs[e.nextOut%uint32(len(e.outputBufs))]
 	written := copyPaddedI420(out, yuv[:want], e.width, e.height, e.stride)
 	if written == 0 {
-		return nil, fmt.Errorf("v4l2: encoder output buffer too small for padded stride %d (w=%d h=%d)", e.stride, e.width, e.height)
+		return nil, fmt.Errorf("%w: output buffer too small for padded stride %d (w=%d h=%d)", errEncodeUsage, e.stride, e.width, e.height)
 	}
 	if err := e.queueBuffer(BufTypeVideoOutputMplane, e.nextOut%uint32(len(e.outputBufs)), uint32(written)); err != nil {
 		return nil, err

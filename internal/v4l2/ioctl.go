@@ -238,6 +238,13 @@ type M2MEncoderOptions struct {
 	// RepeatSeqHeader re-emits SPS/PPS with every IDR (RTSP joinability);
 	// auto-enabled when IPeriod is set.
 	RepeatSeqHeader bool
+	// BufferCount overrides the per-queue buffer count (0 → default 4).
+	// Diagnostic knob for the dual-instance starvation seen on bcm2835.
+	BufferCount uint32
+	// NoExtControls skips the S_EXT_CTRLS pass entirely (diagnostic knob —
+	// probing whether a second session re-programming controls upsets the
+	// driver).
+	NoExtControls bool
 }
 
 // v4l2ExtControl mirrors struct v4l2_ext_control (20 bytes, 64-bit UABI —
