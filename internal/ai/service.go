@@ -17,11 +17,22 @@ import (
 	"github.com/xiqing85/mibee-eye-go/internal/h264"
 )
 
+// FrameSource supplies decoded RGB24 frames for inference: the ffmpeg
+// keyframe decoder, or the direct in-process YUV tap.
+type FrameSource interface {
+	// Frames returns the decoded-frame channel (drop-on-full).
+	Frames() <-chan Frame
+	// Start launches the source (idempotent for push-based taps).
+	Start(ctx context.Context)
+	// Describe identifies the source in the startup log.
+	Describe() string
+}
+
 // Service runs the detection loop for one camera.
 type Service struct {
 	detector    Detector
 	newDetector func(Options) (Detector, error)
-	decoder     *FrameDecoder
+	decoder     FrameSource
 	opts        Options
 	mu          sync.RWMutex
 	snap        Snapshot
@@ -35,7 +46,15 @@ type Service struct {
 // NewService builds the AI service from options. It returns (nil, nil)
 // when disabled or unavailable (fail-open) — callers treat nil as
 // ai:false. The detector factory is injected so tests can stub inference.
+// Frames arrive through the ffmpeg keyframe decoder (AUHub subscriber).
 func NewService(opts Options, hub *h264.AUHub, newDetector func(Options) (Detector, error)) *Service {
+	return NewServiceWithSource(opts, NewFrameDecoder(hub, opts.DecoderBin), newDetector)
+}
+
+// NewServiceWithSource runs the service on an arbitrary frame source —
+// the direct in-process YUV tap (rpicam-vid rotation 90/270 and v4l2
+// backends) instead of the encode → ffmpeg decode round trip.
+func NewServiceWithSource(opts Options, src FrameSource, newDetector func(Options) (Detector, error)) *Service {
 	opts = opts.withDefaults()
 	if !opts.Enabled {
 		slog.Info("ai: disabled by configuration")
@@ -60,7 +79,7 @@ func NewService(opts Options, hub *h264.AUHub, newDetector func(Options) (Detect
 	return &Service{
 		detector:    detector,
 		newDetector: newDetector,
-		decoder:     NewFrameDecoder(hub, opts.DecoderBin),
+		decoder:     src,
 		opts:        opts,
 		events:      make(chan Event, 16),
 		active:      true,
@@ -177,8 +196,7 @@ func (s *Service) Start(ctx context.Context) {
 	}
 	slog.Info("ai: service started", "model", s.detector.ModelName(),
 		"interval_ms", s.opts.IntervalMs, "threshold", s.opts.ConfidenceThreshold,
-		"decoder", s.opts.DecoderBin,
-		"frame", fmt.Sprintf("%dx%d", decoderFrameW, decoderFrameH))
+		"decoder", s.decoder.Describe())
 
 	s.decoder.Start(ctx)
 	go s.runLoop(ctx, s.decoder.Frames())

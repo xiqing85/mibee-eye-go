@@ -44,17 +44,33 @@ func mapAxis(dst, src uint32) []int {
 //   - a src shorter than the I420 plane layout is returned unchanged;
 //   - never panics: all indexing derives from the validated length.
 func DownscaleYU12(src []byte, srcW, srcH, dstW, dstH uint32) []byte {
+	return DownscaleYU12Into(nil, src, srcW, srcH, dstW, dstH)
+}
+
+// DownscaleYU12Into is the buffer-reusing form of DownscaleYU12: the
+// result is written into dst's backing array when it has room, growing
+// with a fresh allocation when it does not. It never aliases src — the
+// identity/upscale/short-input paths copy into dst as well, because the
+// caller's source buffer stays live across the call (pool-backed
+// substream tap). Returns the exact-length result slice.
+func DownscaleYU12Into(dst, src []byte, srcW, srcH, dstW, dstH uint32) []byte {
 	srcY := srcW * srcH
 	srcC := srcW / 2 * (srcH / 2)
 	if srcW == 0 || srcH == 0 || dstW == 0 || dstH == 0 ||
 		dstW > srcW || dstH > srcH ||
 		uint64(len(src)) < uint64(srcY)+2*uint64(srcC) {
-		out := make([]byte, len(src))
+		if uint64(cap(dst)) < uint64(len(src)) {
+			dst = make([]byte, len(src))
+		}
+		out := dst[:len(src)]
 		copy(out, src)
 		return out
 	}
 	if dstW == srcW && dstH == srcH {
-		out := make([]byte, len(src))
+		if uint64(cap(dst)) < uint64(len(src)) {
+			dst = make([]byte, len(src))
+		}
+		out := dst[:len(src)]
 		copy(out, src)
 		return out
 	}
@@ -63,7 +79,11 @@ func DownscaleYU12(src []byte, srcW, srcH, dstW, dstH uint32) []byte {
 	dstCh := int(max(dstH/2, 1))
 	dstCw := int(max(dstW/2, 1))
 	dstC := dstCh * dstCw
-	out := make([]byte, dstYu+2*dstC)
+	outLen := dstYu + 2*dstC
+	if cap(dst) < outLen {
+		dst = make([]byte, outLen)
+	}
+	out := dst[:outLen]
 
 	xmap := mapAxis(dstW, srcW)
 	ymap := mapAxis(dstH, srcH)

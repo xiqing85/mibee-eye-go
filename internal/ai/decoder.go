@@ -62,6 +62,11 @@ func NewFrameDecoder(hub *h264.AUHub, binPath string) *FrameDecoder {
 // never stall ffmpeg).
 func (d *FrameDecoder) Frames() <-chan Frame { return d.frames }
 
+// Describe identifies the source in the startup log.
+func (d *FrameDecoder) Describe() string {
+	return fmt.Sprintf("ffmpeg %s keyframe decode %dx%d", d.binPath, decoderFrameW, decoderFrameH)
+}
+
 // Start runs the decode loop until ctx is cancelled. It spawns ffmpeg,
 // feeds it access units from the hub, and reads fixed-size RGB24 frames.
 // A dying ffmpeg (e.g. malformed input after a restart) is respawned with
