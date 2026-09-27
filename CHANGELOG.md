@@ -7,11 +7,37 @@ Notable changes to MiBee Eye (Go implementation) are documented here.
 > ([mibee-eye-rs](https://github.com/xiqing85/mibee-eye-rs)): same
 > version number, same day, cross-linked notes. Patch versions (fixes
 > only) are independent — either repo may publish its own patch number.
-> The next synchronized minor is v0.3.0 (headline scope: complete
-> GB/T 28181-2022 device-role coverage — see
-> [docs/roadmap-v0.3.0.md](docs/roadmap-v0.3.0.md)).
+> Released synchronized minors: v0.3.0 (GB/T 28181-2022 device-role
+> coverage), v0.4.0 (substream, rotation, browser-hardened web UI).
 
-## [Unreleased]
+## [0.4.0] — 2026-09-27
+
+Synchronized minor release with [mibee-eye-rs](https://github.com/xiqing85/mibee-eye-rs/releases/tag/v0.4.0) and [mibee-eye-notebook](https://github.com/xiqing85/mibee-eye-notebook/releases/tag/v0.4.0) (same version, same day).
+
+### Added
+
+- **Low-resolution bandwidth-saving substream** (SPEC appendix A #20): a
+  second H.264 session (default 640×360 / 400 kbps, fractional fps
+  decimation) on RTSP `/sub`, the ONVIF sub profile and the web player's
+  HD/SD toggle. Runtime failover chain: M2M hardware → ffmpeg (ultrafast)
+  → clean disable; the M2M encoder is self-healing (queue reset + retry)
+  after transport-class errors.
+- **Device-level rotation baked into the stream** (SPEC appendix A #19):
+  0°/180° via libcamera flips; 90°/270° through a raw-YUV rpicam-vid
+  pipeline with in-process transpose and M2M hardware encode.
+- **Direct in-process YUV inference input**: when the pipeline already
+  holds I420 frames (rotation 90/270, v4l2 mode), AI detection consumes
+  them directly — the encode → ffmpeg keyframe-decode round trip, its
+  subprocess and its IDR-cadence coupling are gone, and the converted
+  input preserves the frame aspect ratio.
+- **ONVIF AI motion alarms** as Pull-Point MotionAlarm events.
+- **Seamless MSE reconnect** (SPEC §4.1): the live timeline survives
+  connection drops; stalled clients are released by a per-chunk write
+  deadline instead of wedging a subscriber slot.
+- **In-place camera restart** (`applied:"camera_restart"`): geometry-
+  preserving camera config changes rebuild the pipeline without
+  restarting the process — GB28181 registration, ONVIF and web sessions
+  survive.
 
 - **feat(substream): low-resolution bandwidth-saving substream**
   (`camera.substream.*`, SPEC appendix A #20, default off): a boot-static
@@ -106,6 +132,36 @@ Notable changes to MiBee Eye (Go implementation) are documented here.
   service actions ride the shared path-insensitive handler. The `alarm`
   SSE event is now advertised with AI active instead of requiring
   GB28181 — the alarm bridge exists whenever AI runs.
+
+### Fixed
+
+- The M2M hardware encoder actually works: three UABI bugs (OUTPUT
+  stride, ext-control value offset, EINTR poll) plus a self-healing
+  encode loop for the bcm2835 dual-instance wedge.
+- `PUT /api/config` validates over defaults — partial sections on disk
+  (e.g. a substream without explicit bitrate) no longer reject their own
+  config document, which also broke the live-view rotate button.
+- Snapshot tier-2 transcode no longer hangs on a dead ffmpeg.
+- AI model uploads over slow links (extended read deadline).
+- Deploy unit drops the explicit start limit — an unreachable device
+  recovers automatically.
+- Shared frontend: explicit username login field, alarm toasts, mobile
+  toolbar wrap (390 px), AI model panel envelope fix (the model select
+  rendered empty and the upload button stayed hidden).
+
+### Performance
+
+- Fractional substream decimation decided before any copy; tiled YUV
+  transpose; pooled sub-frame buffers (the per-kept-frame 1.4 MB tap
+  copy is gone); the ffmpeg decode subprocess eliminated on YUV paths.
+
+## [0.3.0] — 2026-09-16
+
+Synchronized minor — complete GB/T 28181-2022 device-role coverage
+(subscribe/notify framework, alarm and position reporting, PTZ command
+decoding, DeviceConfig/HomePosition, X-GB-Ver negotiation, SIP-Date
+seam, talkback receive). Full notes:
+[GitHub release v0.3.0](https://github.com/xiqing85/mibee-eye-go/releases/tag/v0.3.0).
 
 ## [0.2.0] — 2026-09-13
 
