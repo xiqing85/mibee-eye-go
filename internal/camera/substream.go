@@ -28,6 +28,14 @@ import (
 	"github.com/xiqing85/mibee-eye-go/internal/v4l2"
 )
 
+// gcd returns the greatest common divisor (decimation math).
+func gcd(a, b int) int {
+	for b != 0 {
+		a, b = b, a%b
+	}
+	return a
+}
+
 // tapCapacity frames of headroom for encoder jitter; a full tap drops
 // (the sub stream resynchronises on its next IDR).
 const tapCapacity = 2
@@ -68,14 +76,15 @@ type SubstreamOptions struct {
 // SubstreamPipeline owns the second encoder session and the sub frame
 // channel.
 type SubstreamPipeline struct {
-	opts     SubstreamOptions
-	subFPS   int
-	fpsDiv   int // emit every fpsDiv-th tapped frame (>=1)
-	enc      frameEncoder
-	framesCh chan Frame
-	tapCh    chan []byte
-	stopCh   chan struct{}
-	wg       sync.WaitGroup
+	opts        SubstreamOptions
+	subFPS      int
+	decimPeriod uint32 // fractional decimation: of every `period` main
+	decimKeep   uint32 // frames, `keep` reach the encoder (both >= 1)
+	enc         frameEncoder
+	framesCh    chan Frame
+	tapCh       chan []byte
+	stopCh      chan struct{}
+	wg          sync.WaitGroup
 
 	// Failover state — owned by the Run goroutine.
 	openFallback func() (frameEncoder, error)
@@ -103,18 +112,22 @@ func NewSubstreamPipeline(o SubstreamOptions) (*SubstreamPipeline, error) {
 	if subFPS <= 0 {
 		subFPS = 15
 	}
-	fpsDiv := 1
+	// Fractional decimation: 15→10fps keeps 2 of every 3 frames (integer
+	// division alone would silently keep all 15).
+	period, keep := 1, 1
 	if o.MainFPS > subFPS {
-		fpsDiv = o.MainFPS / subFPS
+		g := gcd(o.MainFPS, subFPS)
+		period, keep = o.MainFPS/g, subFPS/g
 	}
 
 	p := &SubstreamPipeline{
-		opts:     o,
-		subFPS:   subFPS,
-		fpsDiv:   fpsDiv,
-		framesCh: make(chan Frame, 16),
-		tapCh:    make(chan []byte, tapCapacity),
-		stopCh:   make(chan struct{}),
+		opts:        o,
+		subFPS:      subFPS,
+		decimPeriod: uint32(period),
+		decimKeep:   uint32(keep),
+		framesCh:    make(chan Frame, 16),
+		tapCh:       make(chan []byte, tapCapacity),
+		stopCh:      make(chan struct{}),
 	}
 
 	probe := o.ProbeEncoder
@@ -196,10 +209,19 @@ func (p *SubstreamPipeline) DroppedFrames() uint64 { return p.dropped.Load() }
 // the caller (reused frame to frame), hence the copy. Frames whose dims
 // do not match the boot geometry are dropped — a geometry-crossing
 // restart goes through the full process restart, not the in-place path.
+// Decimation is decided HERE, before the copy: a dropped-by-cadence
+// frame costs nothing (no 0.9MB memcpy on a 720p tap).
 func (p *SubstreamPipeline) Tap(frame []byte, w, h uint32) {
 	if w != uint32(p.opts.SrcW) || h != uint32(p.opts.SrcH) {
 		p.dropped.Add(1)
 		return
+	}
+	if p.decimPeriod > 1 {
+		n := p.counter.Add(1)
+		if uint32(n)%p.decimPeriod >= p.decimKeep {
+			p.dropped.Add(1)
+			return
+		}
 	}
 	buf := make([]byte, len(frame))
 	copy(buf, frame)
@@ -236,10 +258,6 @@ func (p *SubstreamPipeline) Run(ctx context.Context) {
 				}
 				if p.disabled {
 					continue // drain the tap, keep the main path unblocked
-				}
-				p.counter.Add(1)
-				if p.fpsDiv > 1 && p.counter.Load()%uint64(p.fpsDiv) != 0 {
-					continue
 				}
 				sub := DownscaleYU12(frame, uint32(p.opts.SrcW), uint32(p.opts.SrcH),
 					uint32(p.opts.Width), uint32(p.opts.Height))
