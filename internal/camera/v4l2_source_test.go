@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -362,5 +363,26 @@ func TestV4L2ForceIDRUnsupportedWithoutM2M(t *testing.T) {
 	defer s.Stop()
 	if err := s.ForceIDR(); err == nil {
 		t.Fatal("ForceIDR must report unsupported")
+	}
+}
+
+// ffmpegEncoderArgs: the preset lands in the x264 argument vector; the
+// empty preset keeps the historic veryfast; geometry/gop/bitrate format.
+func TestFFmpegEncoderArgsPresetAndGeometry(t *testing.T) {
+	p := Params{Width: 640, Height: 360, FPS: 10, Bitrate: 400_000}
+	join := func(args []string) string { return strings.Join(args, " ") }
+
+	sub := join(ffmpegEncoderArgs(p, "ultrafast"))
+	for _, want := range []string{
+		"-s 640x360", "-r 10", "-preset ultrafast", "-b:v 400000", "-g 20",
+	} {
+		if !strings.Contains(sub, want) {
+			t.Fatalf("sub args missing %q: %s", want, sub)
+		}
+	}
+
+	dflt := join(ffmpegEncoderArgs(p, ""))
+	if !strings.Contains(dflt, "-preset veryfast") {
+		t.Fatalf("empty preset must default to veryfast: %s", dflt)
 	}
 }

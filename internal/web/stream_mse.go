@@ -168,6 +168,20 @@ func (s *Server) streamMSE(w http.ResponseWriter, r *http.Request, hub *h264.AUH
 	sub := hub.Subscribe(r.Context())
 	defer hub.Unsubscribe(sub.ID)
 
+	// Bound every chunked write: a client that stops reading (but keeps the
+	// socket half-open) fills the TCP send buffer and blocks Write forever
+	// while its hub subscription starves — the "AUs dropped (slow
+	// subscribers)" journal flood during the .161 investigation.
+	writeChunk := func(b []byte) bool {
+		rc := http.NewResponseController(w)
+		_ = rc.SetWriteDeadline(time.Now().Add(10 * time.Second))
+		if _, err := w.Write(b); err != nil {
+			return false
+		}
+		flusher.Flush()
+		return true
+	}
+
 	var cachedSPS, cachedPPS []byte
 	initialized := false
 	rt := realignTracker{seenDrops: sub.Dropped()}
@@ -211,10 +225,9 @@ func (s *Server) streamMSE(w http.ResponseWriter, r *http.Request, hub *h264.AUH
 				continue
 			}
 			width, height := dims()
-			if _, err := w.Write(buildInitSegment(cachedSPS, cachedPPS, width, height)); err != nil {
+			if !writeChunk(buildInitSegment(cachedSPS, cachedPPS, width, height)) {
 				return
 			}
-			flusher.Flush()
 			initialized = true
 		} else if !rt.allow(au, sub.Dropped(), drainedNonKey) {
 			// Loss realignment: wait for an IDR instead of feeding decoders
@@ -234,10 +247,9 @@ func (s *Server) streamMSE(w http.ResponseWriter, r *http.Request, hub *h264.AUH
 
 		seg := buildMediaSegment(nalus, sequence, timestamp, uint32(duration), au.KeyFrame)
 		sequence++
-		if _, err := w.Write(seg); err != nil {
+		if !writeChunk(seg) {
 			return
 		}
-		flusher.Flush()
 	}
 }
 
