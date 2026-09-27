@@ -73,19 +73,47 @@ func RotateYU12(buf, scratch *[]byte, width, height, rotation int) (int, int) {
 	return height, width
 }
 
+// transposeTile is the side length of the square block a plane is
+// transposed in. Whole-row transposition scatters stores with the full
+// destination stride (720 bytes on a 720p frame), so every store misses
+// L1; blocking keeps each tile's source runs, scratch copy and
+// destination runs resident, and 64-byte destination runs land on whole
+// cache lines. Equivalent to the naive scatter byte-for-byte (see
+// TestTransposePlaneTiledMatchesReference).
+const transposeTile = 64
+
 // transposePlane transposes one plane (dims pw×ph) into dst laid out as
 // ph×pw. Clockwise maps src(sx, sy) → dst(ph-1-sy, sx); counter-clockwise
 // maps src(sx, sy) → dst(sy, pw-1-sx).
 func transposePlane(src, dst []byte, pw, ph int, clockwise bool) {
-	for sy := 0; sy < ph; sy++ {
-		row := src[sy*pw : (sy+1)*pw]
-		if clockwise {
-			for sx, v := range row {
-				dst[sx*ph+(ph-1-sy)] = v
+	var tile [transposeTile * transposeTile]byte
+	for sy0 := 0; sy0 < ph; sy0 += transposeTile {
+		syN := min(transposeTile, ph-sy0)
+		for sx0 := 0; sx0 < pw; sx0 += transposeTile {
+			sxN := min(transposeTile, pw-sx0)
+			// Gather: tile row i holds src[(sy0+i)*pw+sx0 … +sxN).
+			for i := 0; i < syN; i++ {
+				s := (sy0+i)*pw + sx0
+				copy(tile[i*transposeTile:i*transposeTile+sxN], src[s:s+sxN])
 			}
-		} else {
-			for sx, v := range row {
-				dst[(pw-1-sx)*ph+sy] = v
+			if clockwise {
+				// dst row sx0+j takes tile column j, reversed:
+				// dst[sx*ph+(ph-1-sy)] = tile[(sy-sy0)*T+j].
+				for j := 0; j < sxN; j++ {
+					d := dst[(sx0+j)*ph+ph-sy0-syN : (sx0+j)*ph+ph-sy0]
+					for k := range d {
+						d[k] = tile[(syN-1-k)*transposeTile+j]
+					}
+				}
+			} else {
+				// dst row pw-1-sx0-j takes tile column j, forward:
+				// dst[(pw-1-sx)*ph+sy] = tile[(sy-sy0)*T+j].
+				for j := 0; j < sxN; j++ {
+					d := dst[(pw-1-sx0-j)*ph+sy0 : (pw-1-sx0-j)*ph+sy0+syN]
+					for k := range d {
+						d[k] = tile[k*transposeTile+j]
+					}
+				}
 			}
 		}
 	}

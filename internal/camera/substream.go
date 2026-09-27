@@ -6,11 +6,10 @@ package camera
 // configured geometry.
 //
 //	   main capture → transform → main encoder ──► Frames()
-//	                    │ Tap (copy, drop-on-full)
-//	                    ▼
+//	                    │ Tap (downscale in-place on the caller's live
+//	                    ▼        frame, drop-on-full, pooled output)
 //	              SubstreamPipeline.Run ──► second encoder session
-//	                   (downscale + fps        (V4L2 M2M or ffmpeg)
-//	                    decimation)
+//	                   (fps decimation          (V4L2 M2M or ffmpeg)
 //
 // The pipeline is boot-static (created in main from the boot config; the
 // camera_restart in-place rebuild keeps tapping the same instance — the
@@ -86,10 +85,16 @@ type SubstreamPipeline struct {
 	stopCh      chan struct{}
 	wg          sync.WaitGroup
 
-	// Failover state — owned by the Run goroutine.
+	// Failover state — `disabled` is atomic: Tap (main pipeline
+	// goroutine) reads it to stop downscaling work the moment the
+	// pipeline gives up; the rest is owned by the Run goroutine.
 	openFallback func() (frameEncoder, error)
 	onFallback   bool
-	disabled     bool
+	disabled     atomic.Bool
+
+	// subPool recycles the downscaled sub frames between Tap and Run —
+	// the only remaining per-frame allocation on the sub path.
+	subPool sync.Pool
 
 	counter atomic.Uint64
 	dropped atomic.Uint64
@@ -128,6 +133,12 @@ func NewSubstreamPipeline(o SubstreamOptions) (*SubstreamPipeline, error) {
 		framesCh:    make(chan Frame, 16),
 		tapCh:       make(chan []byte, tapCapacity),
 		stopCh:      make(chan struct{}),
+	}
+	p.subPool.New = func() any {
+		ch := int(max(uint32(o.Height)/2, 1))
+		cw := int(max(uint32(o.Width)/2, 1))
+		b := make([]byte, o.Width*o.Height+2*ch*cw)
+		return &b
 	}
 
 	probe := o.ProbeEncoder
@@ -204,15 +215,22 @@ func (p *SubstreamPipeline) Frames() <-chan Frame { return p.framesCh }
 func (p *SubstreamPipeline) DroppedFrames() uint64 { return p.dropped.Load() }
 
 // Tap offers a post-transform main frame (w×h I420) to the pipeline.
-// Non-blocking and copy-on-tap: a slow sub pipeline drops frames and
-// never stalls the main capture/encode path. The frame buffer belongs to
-// the caller (reused frame to frame), hence the copy. Frames whose dims
+// Non-blocking: a slow sub pipeline drops frames and never stalls the
+// main capture/encode path. The frame buffer belongs to the caller
+// (reused frame to frame), so instead of copying the full main frame it
+// is consumed synchronously, read-only, while it is still valid: Tap
+// downscales into a pooled sub-sized buffer and only that small frame is
+// queued — the 0.9MB-per-kept-frame tap copy is gone. Frames whose dims
 // do not match the boot geometry are dropped — a geometry-crossing
 // restart goes through the full process restart, not the in-place path.
-// Decimation is decided HERE, before the copy: a dropped-by-cadence
-// frame costs nothing (no 0.9MB memcpy on a 720p tap).
+// Decimation is decided before any work: a dropped-by-cadence frame
+// costs nothing.
 func (p *SubstreamPipeline) Tap(frame []byte, w, h uint32) {
 	if w != uint32(p.opts.SrcW) || h != uint32(p.opts.SrcH) {
+		p.dropped.Add(1)
+		return
+	}
+	if p.disabled.Load() {
 		p.dropped.Add(1)
 		return
 	}
@@ -223,17 +241,29 @@ func (p *SubstreamPipeline) Tap(frame []byte, w, h uint32) {
 			return
 		}
 	}
-	buf := make([]byte, len(frame))
-	copy(buf, frame)
+	bufp := p.subPool.Get().(*[]byte)
+	sub := DownscaleYU12Into((*bufp)[:0], frame, uint32(p.opts.SrcW), uint32(p.opts.SrcH),
+		uint32(p.opts.Width), uint32(p.opts.Height))
 	select {
-	case p.tapCh <- buf:
+	case p.tapCh <- sub:
 	default:
 		p.dropped.Add(1)
+		p.put(sub)
 	}
 }
 
-// Run consumes tapped frames until ctx is canceled or Stop is called:
-// decimate to the sub rate, downscale, encode. Spawns one goroutine.
+// put returns a sub frame's buffer to the pool (no-op for empty slices).
+func (p *SubstreamPipeline) put(b []byte) {
+	if cap(b) == 0 {
+		return
+	}
+	full := b[:cap(b)]
+	p.subPool.Put(&full)
+}
+
+// Run consumes the tapped sub frames until ctx is canceled or Stop is
+// called: encode each (already downscaled, pooled) frame and recycle its
+// buffer. Spawns one goroutine.
 func (p *SubstreamPipeline) Run(ctx context.Context) {
 	p.wg.Add(1)
 	go func() {
@@ -256,13 +286,14 @@ func (p *SubstreamPipeline) Run(ctx context.Context) {
 				if !ok {
 					return
 				}
-				if p.disabled {
-					continue // drain the tap, keep the main path unblocked
+				if p.disabled.Load() {
+					p.put(frame) // drain the tap, keep the main path unblocked
+					continue
 				}
-				sub := DownscaleYU12(frame, uint32(p.opts.SrcW), uint32(p.opts.SrcH),
-					uint32(p.opts.Width), uint32(p.opts.Height))
 				pts := uint64(time.Since(start).Milliseconds()) * 90
-				if err := p.enc.Encode(sub, pts); err != nil {
+				err := p.enc.Encode(frame, pts)
+				p.put(frame)
+				if err != nil {
 					consec++
 					if consec == 1 || consec%warnEveryN == 0 {
 						slog.Warn("substream: encode failed", "error", err, "consecutive", consec)
@@ -288,7 +319,7 @@ func (p *SubstreamPipeline) failover(consec *int) {
 		p.enc = nil
 	}
 	if p.onFallback {
-		p.disabled = true
+		p.disabled.Store(true)
 		*consec = 0
 		slog.Warn("substream: disabled — fallback encoder keeps failing",
 			"tried", name, "note", "sub endpoints will 404 until restart")
@@ -296,7 +327,7 @@ func (p *SubstreamPipeline) failover(consec *int) {
 	}
 	enc, err := p.openFallback()
 	if err != nil {
-		p.disabled = true
+		p.disabled.Store(true)
 		*consec = 0
 		slog.Warn("substream: disabled — encoder failed and no fallback available",
 			"tried", name, "error", err)

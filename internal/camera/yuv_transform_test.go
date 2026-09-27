@@ -197,3 +197,108 @@ func TestNormalizeRotation(t *testing.T) {
 		}
 	}
 }
+
+// transposePlaneReference is the naive full-row scatter the tiled
+// implementation replaced — kept as the equivalence oracle.
+func transposePlaneReference(src, dst []byte, pw, ph int, clockwise bool) {
+	for sy := 0; sy < ph; sy++ {
+		row := src[sy*pw : (sy+1)*pw]
+		if clockwise {
+			for sx, v := range row {
+				dst[sx*ph+(ph-1-sy)] = v
+			}
+		} else {
+			for sx, v := range row {
+				dst[(pw-1-sx)*ph+sy] = v
+			}
+		}
+	}
+}
+
+func TestTransposePlaneTiledMatchesReference(t *testing.T) {
+	// Dims chosen to cross the 64-byte tile boundary in every direction
+	// (below, at, above, off-by-one) plus degenerate single-pixel axes.
+	dims := [][2]int{
+		{1, 1}, {1, 5}, {5, 1}, {5, 7}, {7, 5},
+		{63, 64}, {64, 63}, {64, 64}, {65, 64}, {64, 65}, {65, 65},
+		{128, 96}, {321, 178},
+	}
+	for _, d := range dims {
+		pw, ph := d[0], d[1]
+		src := make([]byte, pw*ph)
+		for i := range src {
+			src[i] = byte(i*31 + i/pw*17)
+		}
+		for _, clockwise := range []bool{true, false} {
+			want := make([]byte, pw*ph)
+			transposePlaneReference(src, want, pw, ph, clockwise)
+			got := make([]byte, pw*ph)
+			transposePlane(src, got, pw, ph, clockwise)
+			for i := range want {
+				if got[i] != want[i] {
+					t.Fatalf("dims %dx%d clockwise=%v: byte %d = %d, want %d",
+						pw, ph, clockwise, i, got[i], want[i])
+				}
+			}
+		}
+	}
+}
+
+func TestRotateYU12FullFrameMatchesReference(t *testing.T) {
+	// End-to-end: a full 720p-class frame rotated by the tiled path must
+	// equal the reference plane-by-plane rotation.
+	w, h := 320, 180
+	cw, ch := (w+1)/2, (h+1)/2
+	frame := make([]byte, w*h+2*cw*ch)
+	for i := range frame {
+		frame[i] = byte(i * 7)
+	}
+	ref := append([]byte(nil), frame...)
+	var refScratch []byte
+	rw, rh := RotateYU12(&ref, &refScratch, w, h, 90)
+
+	got := append([]byte(nil), frame...)
+	var gotScratch []byte
+	gw, gh := RotateYU12(&got, &gotScratch, w, h, 90)
+
+	if gw != rw || gh != rh {
+		t.Fatalf("rotated dims %dx%d, want %dx%d", gw, gh, rw, rh)
+	}
+	for i := range ref {
+		if got[i] != ref[i] {
+			t.Fatalf("byte %d = %d, want %d", i, got[i], ref[i])
+		}
+	}
+}
+
+func benchTranspose(b *testing.B, tiled bool) {
+	const w, h = 1280, 720
+	src := make([]byte, w*h)
+	for i := range src {
+		src[i] = byte(i)
+	}
+	dst := make([]byte, w*h)
+	b.SetBytes(int64(w * h))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if tiled {
+			transposePlane(src, dst, w, h, true)
+		} else {
+			transposePlaneReference(src, dst, w, h, true)
+		}
+	}
+}
+
+func BenchmarkTransposePlane720pTiled(b *testing.B)     { benchTranspose(b, true) }
+func BenchmarkTransposePlane720pReference(b *testing.B) { benchTranspose(b, false) }
+
+func BenchmarkCopyPlane720p(b *testing.B) {
+	const w, h = 1280, 720
+	src := make([]byte, w*h)
+	dst := make([]byte, w*h)
+	b.SetBytes(int64(w * h))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		copy(dst, src)
+	}
+}
