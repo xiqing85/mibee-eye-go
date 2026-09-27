@@ -126,8 +126,11 @@ func (s *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 
 	restoreMaskedSecrets(update, cfg)
 	// Pre-merge camera section, for the in-place-restart eligibility check
-	// below (SPEC §5 applied:"camera_restart").
-	var oldCheck config.Config
+	// below (SPEC §5 applied:"camera_restart"). Unmarshal over the
+	// defaults like Load() does: a partial on-disk section must read its
+	// effective values here, not zeros, or the eligibility comparison
+	// mis-judges which camera params changed.
+	oldCheck := *config.DefaultConfig()
 	if err := yaml.Unmarshal(data, &oldCheck); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to parse config: %v", err))
 		return
@@ -147,7 +150,12 @@ func (s *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 	// validation exits the process, so persisting an invalid config would
 	// brick the service in a systemd restart loop (found live with
 	// camera.rotation: 45 — PUT answered 200 and the device went down).
-	var check config.Config
+	// Unmarshal over the defaults exactly like Load(): a partial section
+	// (e.g. camera.substream without bitrate) must validate with its
+	// boot-time defaults, or a GET → PUT round-trip of an untouched
+	// section is rejected out of the device's own config file
+	// (found by the browser walkthrough on .161, 2026-09-27).
+	check := *config.DefaultConfig()
 	if err := yaml.Unmarshal(out, &check); err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("merged config rejected: %v", err))
 		return
