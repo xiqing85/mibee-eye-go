@@ -318,3 +318,35 @@ func TestCameraRestartIneligibleOnSubstreamChange(t *testing.T) {
 		t.Fatal("identical config must stay eligible")
 	}
 }
+
+// A config file whose substream section relies on boot-time defaults
+// (bitrate absent — the deployed .161 shape) must survive a PUT that does
+// not touch it: Load() fills the defaults, so the PUT merge-validation
+// path must too, or the GET → PUT round-trip rejects its own document
+// ("bitrate must be 1..50000000, got 0" — found by the browser
+// walkthrough, 2026-09-27).
+func TestPutConfigPartialSubstreamKeepsBootDefaults(t *testing.T) {
+	initial := strings.Replace(multiSectionYAML, "  max_backoff: 30s\n",
+		"  max_backoff: 30s\n  substream:\n    enabled: true\n    fps: 10\n", 1)
+	s, path := configServer(t, initial)
+	cookie, csrf := specLogin(t, s)
+
+	rec := doReq(t, s, http.MethodPut, "/api/config",
+		`{"logging":{"level":"debug"}}`, authHdr(cookie, csrf))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT with default-reliant substream: %d %s", rec.Code, rec.Body.String())
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg map[string]interface{}
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	sub := cfg["camera"].(map[string]interface{})["substream"].(map[string]interface{})
+	if sub["enabled"] != true || sub["fps"] != 10 {
+		t.Fatalf("substream section must survive untouched: %v", sub)
+	}
+}
