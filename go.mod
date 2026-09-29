@@ -9,7 +9,7 @@ require (
 	github.com/bluenviron/mediacommon/v2 v2.8.3
 	github.com/google/uuid v1.6.0
 	github.com/mickeyzzc/gb28181-go v0.11.1-0.20260926135633-a0b620bfc7a3
-	github.com/mickeyzzc/onvif-go/v2 v2.2.1-0.20260921022527-139101121644
+	github.com/mickeyzzc/onvif-go/v2 v2.2.1-0.20260929143249-7cafc9ef6955
 	github.com/pion/rtp v1.10.2
 	github.com/yalue/onnxruntime_go v1.31.0
 	golang.org/x/sys v0.47.0

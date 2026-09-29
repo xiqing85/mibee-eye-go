@@ -11,6 +11,8 @@ type mockOnvifConfig struct {
 func (m *mockOnvifConfig) ONVIFPort() int             { return m.port }
 func (m *mockOnvifConfig) ONVIFUsername() string      { return m.username }
 func (m *mockOnvifConfig) ONVIFPassword() string      { return m.password }
+func (m *mockOnvifConfig) ONVIFMedia2Enabled() bool   { return true }
+func (m *mockOnvifConfig) ONVIFDeviceIOEnabled() bool { return true }
 func (m *mockOnvifConfig) RTSPPort() int              { return 8554 }
 func (m *mockOnvifConfig) DeviceIP() string           { return "192.168.1.1" }
 func (m *mockOnvifConfig) CameraDevice() string       { return "/dev/video0" }

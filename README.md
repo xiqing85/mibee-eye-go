@@ -104,6 +104,8 @@ See `configs/config.example.yaml` for all configuration options. Key settings in
 - `onvif.port` - ONVIF HTTP/SOAP port (8080 default)
 - `onvif.username/password` - ONVIF authentication credentials
 - `onvif.events_enabled` - Pull-Point events service: AI motion alarms as MotionAlarm for NVR subscribers (default: true)
+- `onvif.media2_enabled` - Media2 (ver20/tr2) service face at `/onvif/media2_service` — the Profile-T client entry path, advertised in GetServices (default: true)
+- `onvif.deviceio_enabled` - DeviceIO action family with honest empty I/O sets — no relay/audio hardware on this device (default: true)
 - `web.enabled` - Enable Web admin UI (default: true)
 - `web.port` - Web UI HTTP port (8088 default)
 - `gb28181.enabled` - Register with a SIP platform (default: false)

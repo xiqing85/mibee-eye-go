@@ -101,6 +101,17 @@ type ONVIFConfig struct {
 	// a subscription. Boot default true (yaml zero-value fixed up in
 	// setDefaults).
 	EventsEnabled bool `yaml:"events_enabled"`
+	// Media2Enabled serves the minimal Media2 (tr2) face — GetProfiles /
+	// GetStreamUri / SetSynchronizationPoint — on /onvif/media2_service
+	// and advertises the ver20/media namespace in GetServices (the
+	// Profile-T entry path). Boot default true.
+	Media2Enabled bool `yaml:"media2_enabled"`
+	// DeviceIOEnabled answers the alarm I/O family (GetRelayOutputs /
+	// GetDigitalInputs / …) on the device service endpoint with honest
+	// empty sets — this hardware has no relays or digital inputs — and
+	// advertises the deviceIO namespace in GetServices. Boot default
+	// true.
+	DeviceIOEnabled bool `yaml:"deviceio_enabled"`
 }
 
 // WebConfig holds Web UI server settings.
@@ -293,10 +304,12 @@ func DefaultConfig() *Config {
 			UDPRTCPPort:          8001,
 		},
 		ONVIF: ONVIFConfig{
-			Port:          8080,
-			Username:      "admin",
-			Password:      "",
-			EventsEnabled: true,
+			Port:            8080,
+			Username:        "admin",
+			Password:        "",
+			EventsEnabled:   true,
+			Media2Enabled:   true,
+			DeviceIOEnabled: true,
 		},
 		Device: DeviceConfig{
 			Name:         "Pi Camera V1",
@@ -501,6 +514,8 @@ func applyEnvOverrides(cfg *Config) {
 	overrideInt("MIBEE_EYE_ONVIF_PORT", &cfg.ONVIF.Port)
 	overrideString("MIBEE_EYE_ONVIF_USERNAME", &cfg.ONVIF.Username)
 	overrideString("MIBEE_EYE_ONVIF_PASSWORD", &cfg.ONVIF.Password)
+	overrideBool("MIBEE_EYE_ONVIF_MEDIA2_ENABLED", &cfg.ONVIF.Media2Enabled)
+	overrideBool("MIBEE_EYE_ONVIF_DEVICEIO_ENABLED", &cfg.ONVIF.DeviceIOEnabled)
 	// Web section
 	overrideBool("MIBEE_EYE_WEB_ENABLED", &cfg.Web.Enabled)
 	overrideInt("MIBEE_EYE_WEB_PORT", &cfg.Web.Port)

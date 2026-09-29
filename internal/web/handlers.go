@@ -53,9 +53,11 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 			"password": "",
 		},
 		"onvif": map[string]interface{}{
-			"port":     oc.ONVIFPort(),
-			"username": oc.ONVIFUsername(),
-			"password": maskPassword(oc.ONVIFPassword()),
+			"port":             oc.ONVIFPort(),
+			"username":         oc.ONVIFUsername(),
+			"password":         maskPassword(oc.ONVIFPassword()),
+			"media2_enabled":   oc.ONVIFMedia2Enabled(),
+			"deviceio_enabled": oc.ONVIFDeviceIOEnabled(),
 		},
 		"device": map[string]interface{}{
 			"name":          oc.DeviceName(),
