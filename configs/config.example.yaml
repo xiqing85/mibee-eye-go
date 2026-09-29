@@ -123,6 +123,16 @@ onvif:
   # tns1:VideoSource/MotionAlarm while an NVR holds a subscription
   events_enabled: true
 
+  # Serve the minimal Media2 (tr2) face — GetProfiles / GetStreamUri /
+  # SetSynchronizationPoint — on /onvif/media2_service and advertise the
+  # ver20/media namespace in GetServices (Profile-T entry path)
+  media2_enabled: true
+
+  # Answer the alarm I/O family (GetRelayOutputs / GetDigitalInputs / ...)
+  # with honest empty sets — this hardware has no relays or digital
+  # inputs — and advertise the deviceIO namespace in GetServices
+  deviceio_enabled: true
+
 # ONVIF device information (exposed via GetDeviceInformation)
 device:
   # Friendly camera name

@@ -103,6 +103,8 @@ Linux 预编译产物（amd64 / arm64 / armv7）见
 - `onvif.port` - ONVIF HTTP/SOAP 端口（默认 8080）
 - `onvif.username/password` - ONVIF 认证凭据
 - `onvif.events_enabled` - Pull-Point 事件服务：AI 运动告警以 MotionAlarm 推送给订阅的 NVR（默认 true）
+- `onvif.media2_enabled` - Media2（ver20/tr2）服务面 `/onvif/media2_service`——Profile T 客户端首选入口，GetServices 加法广告（默认 true）
+- `onvif.deviceio_enabled` - DeviceIO 动作族，诚实空集应答——本机无继电器/音频硬件（默认 true）
 - `web.enabled` - 启用 Web 管理界面（默认 true）
 - `web.port` - Web 界面 HTTP 端口（默认 8088）
 - `gb28181.enabled` - 向 SIP 平台注册（默认 false）

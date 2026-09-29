@@ -752,3 +752,376 @@ func TestSubstreamProfileAndStreamUri(t *testing.T) {
 		t.Fatalf("main token must keep the /stream mount:\n%s", body)
 	}
 }
+
+// tr2Request builds a SOAP body whose action element carries the ver20
+// (Media2) namespace.
+func tr2Request(action, inner string) string {
+	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">
+<s:Body>
+<t2:%s xmlns:t2="http://www.onvif.org/ver20/media/wsdl">%s</t2:%s>
+</s:Body>
+</s:Envelope>`, action, inner, action)
+}
+
+// TestMedia2FaceContract (onvif.media2_enabled, default true): the tr2
+// face answers on its own /onvif/media2_service mount with the ver20
+// shape — plain Uri (no MediaUri wrapper), main profile first — while
+// the Media1 face keeps its ver10 shape on the shared handler.
+func TestMedia2FaceContract(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.ONVIF.Port = testONVIFPort
+	cfg.ONVIF.Username = "admin"
+	cfg.ONVIF.Password = testPassword
+	cfg.RTSP.Port = testRTSPPort
+	cfg.Camera.Width = 1280
+	cfg.Camera.Height = 720
+	cfg.Camera.FPS = 25
+	cfg.Camera.Bitrate = 2000000
+
+	pm := camera.NewParamManager(newMockCamera())
+	sub := &camera.SubstreamInfo{Width: 640, Height: 360, FPS: 15, Bitrate: 400000}
+	srv, err := New(cfg, testAdvertiseIP, pm, onvif.NewSnapshotBuffer(true, "rpicam-still", "ffmpeg"), sub)
+	if err != nil {
+		t.Fatalf("onvifgo.New: %v", err)
+	}
+	ts := httptest.NewServer(srv.mux)
+	t.Cleanup(ts.Close)
+
+	// tr2 GetProfiles: ver20/media wire, main first (the NVR-equivalent
+	// entry path picks the first profile).
+	status, body := postSOAP(t, ts, "/onvif/media2_service", tr2Request("GetProfiles", ""))
+	if status != http.StatusOK {
+		t.Fatalf("media2 GetProfiles status = %d, want 200; body: %s", status, body)
+	}
+	if !strings.Contains(body, "http://www.onvif.org/ver20/media/wsdl") {
+		t.Errorf("media2 response must carry the ver20/media namespace:\n%s", body)
+	}
+	mainAt := strings.Index(body, `token="main"`)
+	subAt := strings.Index(body, `token="sub"`)
+	if mainAt < 0 || subAt < 0 {
+		t.Fatalf("media2 face must list both profiles:\n%s", body)
+	}
+	if mainAt > subAt {
+		t.Fatalf("media2 face must keep main first:\n%s", body)
+	}
+
+	// tr2 GetStreamUri: plain Uri element, no MediaUri wrapper.
+	status, body = postSOAP(t, ts, "/onvif/media2_service",
+		tr2Request("GetStreamUri", "<ProfileToken>main</ProfileToken>"))
+	if status != http.StatusOK {
+		t.Fatalf("media2 GetStreamUri status = %d, want 200; body: %s", status, body)
+	}
+	if strings.Contains(body, "MediaUri") {
+		t.Errorf("media2 GetStreamUri must not use the ver10 MediaUri wrapper:\n%s", body)
+	}
+	m := regexp.MustCompile(`<(?:[A-Za-z0-9]+:)?Uri(?:\s[^>]*)?>([^<]+)</(?:[A-Za-z0-9]+:)?Uri>`).FindStringSubmatch(body)
+	if m == nil {
+		t.Fatalf("media2 GetStreamUri response missing Uri:\n%s", body)
+	}
+	want := fmt.Sprintf("rtsp://%s:%d/stream", testAdvertiseIP, testRTSPPort)
+	if m[1] != want {
+		t.Errorf("media2 Uri = %q, want %q", m[1], want)
+	}
+
+	// Legacy lock: the Media1 face on the shared handler keeps its ver10
+	// shape (path-insensitive dispatch unaffected by the media2 subtree).
+	status, body = postSOAP(t, ts, "/onvif/media_service", `<?xml version="1.0" encoding="UTF-8"?>
+<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">
+<s:Body>
+<GetProfiles xmlns="http://www.onvif.org/ver10/media/wsdl"/>
+</s:Body>
+</s:Envelope>`)
+	if status != http.StatusOK {
+		t.Fatalf("media1 GetProfiles status = %d, want 200", status)
+	}
+	if !strings.Contains(body, "http://www.onvif.org/ver10/media/wsdl") {
+		t.Errorf("media1 response must stay on the ver10/media namespace:\n%s", body)
+	}
+	// `fixed="true"` is a Profile attribute in both faces; the tr2-only
+	// discriminator is the Configurations wrapper element.
+	if strings.Contains(body, "Configurations") {
+		t.Errorf("media1 response must not leak the media2 profile shape:\n%s", body)
+	}
+}
+
+// TestGetServicesFacesContract: GetServices advertises the media2 and
+// deviceIO entries with XAddrs matching the actual mounts, and hides
+// them when the config keys are off.
+func TestGetServicesFacesContract(t *testing.T) {
+	getServices := `<?xml version="1.0" encoding="UTF-8"?>
+<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">
+<s:Body>
+<GetServices xmlns="http://www.onvif.org/ver10/device/wsdl"/>
+</s:Body>
+</s:Envelope>`
+	media2XAddr := fmt.Sprintf("http://%s:%d/onvif/media2_service", testAdvertiseIP, testONVIFPort)
+	deviceIOXAddr := fmt.Sprintf("http://%s:%d/onvif/device_service", testAdvertiseIP, testONVIFPort)
+
+	t.Run("both faces advertised by default", func(t *testing.T) {
+		ts := newTestServer(t)
+		status, body := postSOAP(t, ts, "/onvif/device_service", getServices)
+		if status != http.StatusOK {
+			t.Fatalf("GetServices status = %d; body: %s", status, body)
+		}
+		if !strings.Contains(body, "http://www.onvif.org/ver20/media/wsdl") || !strings.Contains(body, media2XAddr) {
+			t.Errorf("GetServices must advertise the media2 entry at %s:\n%s", media2XAddr, body)
+		}
+		if !strings.Contains(body, "http://www.onvif.org/ver10/deviceIO/wsdl") || !strings.Contains(body, deviceIOXAddr) {
+			t.Errorf("GetServices must advertise the deviceIO entry at %s:\n%s", deviceIOXAddr, body)
+		}
+	})
+
+	t.Run("media2 disabled hides the entry and keeps legacy dispatch", func(t *testing.T) {
+		cfg := config.DefaultConfig()
+		cfg.ONVIF.Port = testONVIFPort
+		cfg.ONVIF.Username = "admin"
+		cfg.ONVIF.Password = testPassword
+		cfg.RTSP.Port = testRTSPPort
+		cfg.ONVIF.Media2Enabled = false
+		pm := camera.NewParamManager(newMockCamera())
+		srv, err := New(cfg, testAdvertiseIP, pm, onvif.NewSnapshotBuffer(true, "rpicam-still", "ffmpeg"), nil)
+		if err != nil {
+			t.Fatalf("onvifgo.New: %v", err)
+		}
+		ts := httptest.NewServer(srv.mux)
+		t.Cleanup(ts.Close)
+
+		status, body := postSOAP(t, ts, "/onvif/device_service", getServices)
+		if status != http.StatusOK {
+			t.Fatalf("GetServices status = %d", status)
+		}
+		if strings.Contains(body, "http://www.onvif.org/ver20/media/wsdl") {
+			t.Errorf("media2 entry must be hidden when media2_enabled=false:\n%s", body)
+		}
+
+		// With the subtree absent, the media2_service path falls through
+		// to the shared handler and answers the Media1 shape — the
+		// historical path-insensitive dispatch.
+		status, body = postSOAP(t, ts, "/onvif/media2_service", `<?xml version="1.0" encoding="UTF-8"?>
+<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">
+<s:Body>
+<GetProfiles xmlns="http://www.onvif.org/ver10/media/wsdl"/>
+</s:Body>
+</s:Envelope>`)
+		if status != http.StatusOK {
+			t.Fatalf("legacy GetProfiles on media2 path: status = %d; body: %s", status, body)
+		}
+		if !strings.Contains(body, "http://www.onvif.org/ver10/media/wsdl") {
+			t.Errorf("legacy dispatch must answer the ver10 shape:\n%s", body)
+		}
+	})
+
+	t.Run("deviceio disabled hides the entry and the actions", func(t *testing.T) {
+		cfg := config.DefaultConfig()
+		cfg.ONVIF.Port = testONVIFPort
+		cfg.ONVIF.Username = "admin"
+		cfg.ONVIF.Password = testPassword
+		cfg.RTSP.Port = testRTSPPort
+		cfg.ONVIF.DeviceIOEnabled = false
+		pm := camera.NewParamManager(newMockCamera())
+		srv, err := New(cfg, testAdvertiseIP, pm, onvif.NewSnapshotBuffer(true, "rpicam-still", "ffmpeg"), nil)
+		if err != nil {
+			t.Fatalf("onvifgo.New: %v", err)
+		}
+		ts := httptest.NewServer(srv.mux)
+		t.Cleanup(ts.Close)
+
+		status, body := postSOAP(t, ts, "/onvif/device_service", getServices)
+		if status != http.StatusOK {
+			t.Fatalf("GetServices status = %d", status)
+		}
+		if strings.Contains(body, "http://www.onvif.org/ver10/deviceIO/wsdl") {
+			t.Errorf("deviceIO entry must be hidden when deviceio_enabled=false:\n%s", body)
+		}
+
+		status, body = postSOAP(t, ts, "/onvif/device_service",
+			`<?xml version="1.0" encoding="UTF-8"?>
+<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">
+<s:Body>
+<GetRelayOutputs xmlns="http://www.onvif.org/ver10/deviceIO/wsdl"/>
+</s:Body>
+</s:Envelope>`)
+		if status == http.StatusOK {
+			t.Fatalf("GetRelayOutputs must fault when deviceio_enabled=false; body: %s", body)
+		}
+		if !strings.Contains(body, "Fault") {
+			t.Errorf("expected SOAP fault for disabled deviceIO, got: %s", body)
+		}
+	})
+}
+
+// TestDeviceIOEmptySetsContract (onvif.deviceio_enabled, default true):
+// the alarm I/O family stays answerable with honest empty sets — this
+// hardware has no relays, digital inputs, or audio — and mutating a
+// nonexistent relay faults instead of pretending.
+func TestDeviceIOEmptySetsContract(t *testing.T) {
+	ts := newTestServer(t)
+
+	getRelays := `<?xml version="1.0" encoding="UTF-8"?>
+<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">
+<s:Body>
+<GetRelayOutputs xmlns="http://www.onvif.org/ver10/deviceIO/wsdl"/>
+</s:Body>
+</s:Envelope>`
+	status, body := postSOAP(t, ts, "/onvif/device_service", getRelays)
+	if status != http.StatusOK {
+		t.Fatalf("GetRelayOutputs status = %d; body: %s", status, body)
+	}
+	if !strings.Contains(body, "GetRelayOutputsResponse") {
+		t.Errorf("GetRelayOutputs must answer, not fault:\n%s", body)
+	}
+	if strings.Contains(body, "relay_1") || strings.Contains(body, "relay_2") {
+		t.Errorf("GetRelayOutputs fabricated simulator relays:\n%s", body)
+	}
+
+	getInputs := `<?xml version="1.0" encoding="UTF-8"?>
+<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">
+<s:Body>
+<GetDigitalInputs xmlns="http://www.onvif.org/ver10/deviceIO/wsdl"/>
+</s:Body>
+</s:Envelope>`
+	status, body = postSOAP(t, ts, "/onvif/device_service", getInputs)
+	if status != http.StatusOK {
+		t.Fatalf("GetDigitalInputs status = %d; body: %s", status, body)
+	}
+	if strings.Contains(body, "di_1") {
+		t.Errorf("GetDigitalInputs fabricated a simulator input:\n%s", body)
+	}
+
+	getCaps := `<?xml version="1.0" encoding="UTF-8"?>
+<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">
+<s:Body>
+<GetDeviceIOServiceCapabilities xmlns="http://www.onvif.org/ver10/deviceIO/wsdl"/>
+</s:Body>
+</s:Envelope>`
+	status, body = postSOAP(t, ts, "/onvif/device_service", getCaps)
+	if status != http.StatusOK {
+		t.Fatalf("GetDeviceIOServiceCapabilities status = %d; body: %s", status, body)
+	}
+	for _, want := range []string{`RelayOutputs="0"`, `DigitalInputs="0"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("deviceIO capabilities missing honest zero count %q:\n%s", want, body)
+		}
+	}
+
+	// Audio outputs: media-service action, empty by design (no audio
+	// hardware) — an honest response, not an ActionNotSupported fault.
+	status, body = postSOAP(t, ts, "/onvif/media_service", soapRequest("GetAudioOutputs", ""))
+	if status != http.StatusOK {
+		t.Fatalf("GetAudioOutputs status = %d; body: %s", status, body)
+	}
+	if !strings.Contains(body, "GetAudioOutputsResponse") {
+		t.Errorf("GetAudioOutputs must answer with the empty set:\n%s", body)
+	}
+
+	// Mutating a relay that does not exist must fault (write action —
+	// authenticated with the digest ladder).
+	setRelay := `<?xml version="1.0" encoding="UTF-8"?>
+<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">
+<s:Body>
+<SetRelayOutputState xmlns="http://www.onvif.org/ver10/deviceIO/wsdl">
+<RelayOutputToken>relay_1</RelayOutputToken>
+<LogicalState>active</LogicalState>
+</SetRelayOutputState>
+</s:Body>
+</s:Envelope>`
+	status, body = postSOAP(t, ts, "/onvif/device_service", withAuth(setRelay, "digest"))
+	if status == http.StatusOK {
+		t.Fatalf("SetRelayOutputState on empty hardware must fault; body: %s", body)
+	}
+	if !strings.Contains(body, "not found") {
+		t.Errorf("fault must say the relay does not exist, got: %s", body)
+	}
+}
+
+// TestOSDEmptyStoreContract: the OSD configuration loop is wired with the
+// library's store — empty by default (no OSD engine fabricates nothing),
+// and a client-created OSD round-trips.
+func TestOSDEmptyStoreContract(t *testing.T) {
+	ts := newTestServer(t)
+
+	getOSDs := `<?xml version="1.0" encoding="UTF-8"?>
+<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">
+<s:Body>
+<GetOSDs xmlns="http://www.onvif.org/ver10/media/wsdl"/>
+</s:Body>
+</s:Envelope>`
+	status, body := postSOAP(t, ts, "/onvif/media_service", getOSDs)
+	if status != http.StatusOK {
+		t.Fatalf("GetOSDs status = %d; body: %s", status, body)
+	}
+	if !strings.Contains(body, "GetOSDsResponse") {
+		t.Errorf("GetOSDs must answer:\n%s", body)
+	}
+	if strings.Contains(body, "osd_1") {
+		t.Errorf("OSD store must start empty — no fabricated OSDs:\n%s", body)
+	}
+}
+
+// The ver10 encoder family + sync point on the shared handler (the
+// onvif-go server completion batch): one configuration per profile,
+// H264 options block, and the ver10 sync point answering the ver10
+// shape (the tr2 handler stays on the media2 subtree).
+func TestEncoderFamilyAndSyncPointContract(t *testing.T) {
+	ts := newTestServer(t)
+
+	list := `<?xml version="1.0" encoding="UTF-8"?>
+<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">
+<s:Body>
+<GetVideoEncoderConfigurations xmlns="http://www.onvif.org/ver10/media/wsdl"/>
+</s:Body>
+</s:Envelope>`
+	status, body := postSOAP(t, ts, "/onvif/media_service", list)
+	if status != http.StatusOK {
+		t.Fatalf("GetVideoEncoderConfigurations status = %d, want 200; body: %s", status, body)
+	}
+	if !strings.Contains(body, `token="main_encoder"`) {
+		t.Errorf("main_encoder configuration missing:\n%s", body)
+	}
+
+	opts := `<?xml version="1.0" encoding="UTF-8"?>
+<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">
+<s:Body>
+<GetVideoEncoderConfigurationOptions xmlns="http://www.onvif.org/ver10/media/wsdl"/>
+</s:Body>
+</s:Envelope>`
+	status, body = postSOAP(t, ts, "/onvif/media_service", opts)
+	if status != http.StatusOK {
+		t.Fatalf("GetVideoEncoderConfigurationOptions status = %d, want 200; body: %s", status, body)
+	}
+	if !strings.Contains(body, "ResolutionsAvailable") {
+		t.Errorf("H264 options block missing:\n%s", body)
+	}
+
+	sync := `<?xml version="1.0" encoding="UTF-8"?>
+<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">
+<s:Body>
+<SetSynchronizationPoint xmlns="http://www.onvif.org/ver10/media/wsdl">
+<ProfileToken>main</ProfileToken>
+</SetSynchronizationPoint>
+</s:Body>
+</s:Envelope>`
+	status, body = postSOAP(t, ts, "/onvif/media_service", withAuth(sync, "digest"))
+	if status != http.StatusOK {
+		t.Fatalf("SetSynchronizationPoint status = %d, want 200; body: %s", status, body)
+	}
+	if !strings.Contains(body, "SetSynchronizationPointResponse") {
+		t.Errorf("ver10 sync ack missing:\n%s", body)
+	}
+
+	// The tr2 encoder list answers on the media2 subtree.
+	tr2 := `<?xml version="1.0" encoding="UTF-8"?>
+<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">
+<s:Body>
+<GetVideoEncoderConfigurations xmlns="http://www.onvif.org/ver20/media/wsdl"/>
+</s:Body>
+</s:Envelope>`
+	status, body = postSOAP(t, ts, "/onvif/media2_service", tr2)
+	if status != http.StatusOK {
+		t.Fatalf("tr2 GetVideoEncoderConfigurations status = %d, want 200; body: %s", status, body)
+	}
+	if !strings.Contains(body, `token="main_encoder"`) {
+		t.Errorf("tr2 main_encoder configuration missing:\n%s", body)
+	}
+}

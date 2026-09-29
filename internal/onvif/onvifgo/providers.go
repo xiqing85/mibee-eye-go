@@ -1,9 +1,8 @@
 package onvifgo
 
 import (
-	"strings"
-
 	"fmt"
+	"strings"
 
 	"github.com/xiqing85/mibee-eye-go/internal/camera"
 	"github.com/xiqing85/mibee-eye-go/internal/config"
@@ -247,6 +246,19 @@ func toFloat(v interface{}) float64 {
 		return 0
 	}
 }
+
+// emptyRelayController is the hardware-honest DeviceIO backend: this
+// device has no relay outputs and no digital inputs, so the alarm I/O
+// family answers empty sets and mutations fault with the shared
+// not-found error (the library's simulator would otherwise fabricate
+// relay_1/relay_2/di_1 behind them).
+type emptyRelayController struct{}
+
+func (emptyRelayController) RelayOutputs() []provider.RelayOutput { return nil }
+
+func (emptyRelayController) DigitalInputs() []provider.DigitalInput { return nil }
+
+func (emptyRelayController) SetRelayState(_, _ string) error { return provider.ErrNotFound }
 
 // deviceNameOrDefault returns the advertised friendly name with the
 // historical fallback.

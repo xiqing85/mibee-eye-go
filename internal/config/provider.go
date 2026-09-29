@@ -6,11 +6,17 @@ package config
 
 // ConfigProvider provides read-only access to camera, ONVIF, RTSP, and device
 // configuration. This is the unified configuration interface used by the onvif
-// and web packages. Implementations must provide all 18 methods.
+// and web packages. Implementations must provide all 20 methods.
 type ConfigProvider interface {
 	ONVIFUsername() string
 	ONVIFPassword() string
 	ONVIFPort() int
+	// ONVIFMedia2Enabled/ONVIFDeviceIOEnabled expose the Media2 face and
+	// the DeviceIO alarm I/O family flags (config keys
+	// onvif.media2_enabled / onvif.deviceio_enabled) for the config API's
+	// onvif section.
+	ONVIFMedia2Enabled() bool
+	ONVIFDeviceIOEnabled() bool
 	RTSPPort() int
 	DeviceIP() string
 	CameraDevice() string

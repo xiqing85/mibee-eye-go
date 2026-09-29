@@ -55,12 +55,22 @@ type Server struct {
 // the /snapshot endpoint respectively. sub, when non-nil, adds the
 // low-resolution substream as the second media profile (token `sub`,
 // GetStreamUri routes it to the RTSP /sub mount — SPEC appendix A #20).
-func New(cfg *config.Config, advertiseIP string, params *camera.ParamManager, snapshot *onvif.SnapshotBuffer, sub *camera.SubstreamInfo) (*Server, error) {
+func New(cfg *config.Config, advertiseIP string, params *camera.ParamManager, snapshot *onvif.SnapshotBuffer, sub *camera.SubstreamInfo, opts ...onvifserver.Option) (*Server, error) {
 	s := &Server{
 		cfg:         cfg,
 		snapshot:    snapshot,
 		advertiseIP: advertiseIP,
 	}
+
+	libOpts := append([]onvifserver.Option{
+		onvifserver.WithDeviceInfoProvider(&deviceInfoProvider{cfg: cfg}),
+		onvifserver.WithStreamURIProvider(newStreamProvider(cfg.RTSP.Port)),
+		onvifserver.WithImagingProvider(&imagingProvider{pm: params}),
+		// Hardware-honest DeviceIO backend: without this the library's
+		// simulator fabricates relay_1/relay_2/di_1 behind GetRelayOutputs
+		// and GetDigitalInputs.
+		onvifserver.WithRelayController(emptyRelayController{}),
+	}, opts...)
 
 	libServer, err := onvifserver.New(&onvifserver.Config{
 		Host:     "0.0.0.0",
@@ -85,7 +95,14 @@ func New(cfg *config.Config, advertiseIP string, params *camera.ParamManager, sn
 		// Pull-Point events service (AI MotionAlarm; key gates the
 		// GetCapabilities XAddr advertisement too).
 		SupportEvents: cfg.ONVIF.EventsEnabled,
-		Profiles:      profilesFromConfig(cfg, sub),
+		// Minimal Media2 (tr2) face on /onvif/media2_service + GetServices
+		// entry (Profile-T entry path).
+		SupportMedia2: cfg.ONVIF.Media2Enabled,
+		// Alarm I/O family on the device service endpoint + GetServices
+		// entry; the honest empty sets come from the injected relay
+		// controller below (no relay/DI hardware on this device).
+		SupportDeviceIO: cfg.ONVIF.DeviceIOEnabled,
+		Profiles:        profilesFromConfig(cfg, sub),
 		// GetScopes answers these (#37). Superset of the discovery scopes:
 		// ProbeMatches carries only name+hardware (byte-stable for the NVR),
 		// GetScopes additionally advertises the encoder type.
@@ -97,22 +114,13 @@ func New(cfg *config.Config, advertiseIP string, params *camera.ParamManager, sn
 		// Snapshot endpoint shape (#36): historical parameterless /snapshot.
 		SnapshotPath:             "/snapshot",
 		SnapshotURIParameterless: true,
-	},
-		onvifserver.WithDeviceInfoProvider(&deviceInfoProvider{cfg: cfg}),
-		onvifserver.WithStreamURIProvider(newStreamProvider(cfg.RTSP.Port)),
-		onvifserver.WithImagingProvider(&imagingProvider{pm: params}),
-	)
+	}, libOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("onvif server: %w", err)
 	}
 	s.libServer = libServer
 
-	s.soap = onvifsoap.NewHandlerWithOptions(onvifsoap.HandlerOptions{
-		Username:         cfg.ONVIF.Username,
-		Password:         cfg.ONVIF.Password,
-		Auth:             onvifsoap.DefaultAuthPolicy(),
-		ExplicitPrefixes: true,
-	})
+	s.soap = s.newSOAPHandler()
 
 	s.registerActions()
 	s.responder = s.newResponder()
@@ -126,22 +134,43 @@ func New(cfg *config.Config, advertiseIP string, params *camera.ParamManager, sn
 		// embeds the pull-point id in the path, so PullMessages /
 		// Renew / Unsubscribe need their own (path-bound) handler.
 		// Same auth posture as the shared SOAP handler.
-		sub := onvifsoap.NewHandlerWithOptions(onvifsoap.HandlerOptions{
-			Username:         cfg.ONVIF.Username,
-			Password:         cfg.ONVIF.Password,
-			Auth:             onvifsoap.DefaultAuthPolicy(),
-			ExplicitPrefixes: true,
-		})
+		sub := s.newSOAPHandler()
 		sub.RegisterContextHandler("PullMessages", s.libServer.HandlePullMessages)
 		sub.RegisterContextHandler("Renew", s.libServer.HandleRenew)
 		sub.RegisterContextHandler("Unsubscribe", s.libServer.HandleUnsubscribe)
 		mux.Handle("/onvif/events_service/sub/", sub)
+	}
+	if cfg.ONVIF.Media2Enabled {
+		// Media2 rides its own path-bound handler: GetProfiles and
+		// GetStreamUri repeat the Media1 action names, and the shared
+		// handler dispatches by action name only — the subtree keeps
+		// both faces answerable at their advertised endpoints (the
+		// GetServices ver20/media XAddr is exactly this mount).
+		media2 := s.newSOAPHandler()
+		media2.RegisterContextHandler("GetProfiles", s.libServer.HandleMedia2GetProfiles)
+		media2.RegisterContextHandler("GetStreamUri", s.libServer.HandleMedia2GetStreamUri)
+		media2.RegisterContextHandler("SetSynchronizationPoint", s.libServer.HandleMedia2SetSynchronizationPoint)
+		media2.RegisterContextHandler("GetVideoEncoderConfigurations", s.libServer.HandleMedia2GetVideoEncoderConfigurations)
+	media2.RegisterContextHandler("GetServiceCapabilities", s.libServer.HandleMedia2GetServiceCapabilities)
+		mux.Handle("/onvif/media2_service", media2)
 	}
 	mux.Handle("/", probeSniffer{soap: s.soap, probe: s.responder})
 
 	s.mux = mux
 
 	return s, nil
+}
+
+// newSOAPHandler builds a SOAP handler with the service credentials and
+// response encoding settings — the shared all-action handler, the events
+// subscription subtree, and the Media2 subtree all share this posture.
+func (s *Server) newSOAPHandler() *onvifsoap.Handler {
+	return onvifsoap.NewHandlerWithOptions(onvifsoap.HandlerOptions{
+		Username:         s.cfg.ONVIF.Username,
+		Password:         s.cfg.ONVIF.Password,
+		Auth:             onvifsoap.DefaultAuthPolicy(),
+		ExplicitPrefixes: true,
+	})
 }
 
 // registerActions registers every supported action on the shared SOAP
@@ -160,8 +189,37 @@ func (s *Server) registerActions() {
 	s.soap.RegisterContextHandler("GetProfiles", s.libServer.HandleGetProfiles)
 	s.soap.RegisterContextHandler("GetStreamUri", s.libServer.HandleGetStreamUri)
 	s.soap.RegisterContextHandler("GetVideoSources", s.libServer.HandleGetVideoSources)
+	s.soap.RegisterContextHandler("GetVideoEncoderConfigurations", s.libServer.HandleGetVideoEncoderConfigurations)
+	s.soap.RegisterContextHandler("GetVideoEncoderConfigurationOptions", s.libServer.HandleGetVideoEncoderConfigurationOptions)
+	// ver10 sync point — the tr2 handler lives on the media2 subtree;
+	// both fire the keyframe hook passed via New's opts.
+	s.soap.RegisterContextHandler("SetSynchronizationPoint", s.libServer.HandleSetSynchronizationPoint)
 	if s.snapshot.Enabled() {
 		s.soap.RegisterContextHandler("GetSnapshotUri", s.libServer.HandleGetSnapshotUri)
+	}
+
+	// Media OSD configuration loop + audio configuration family. The OSD
+	// store starts empty (no OSD engine on this device — entries exist
+	// only after a client creates them, nothing is fabricated) and the
+	// audio enumerations are empty because the hardware has no audio.
+	s.soap.RegisterContextHandler("GetOSDs", s.libServer.HandleGetOSDs)
+	s.soap.RegisterContextHandler("GetOSD", s.libServer.HandleGetOSD)
+	s.soap.RegisterContextHandler("CreateOSD", s.libServer.HandleCreateOSD)
+	s.soap.RegisterContextHandler("SetOSD", s.libServer.HandleSetOSD)
+	s.soap.RegisterContextHandler("DeleteOSD", s.libServer.HandleDeleteOSD)
+	s.soap.RegisterContextHandler("GetAudioSources", s.libServer.HandleGetAudioSources)
+	s.soap.RegisterContextHandler("GetAudioSourceConfigurations", s.libServer.HandleGetAudioSourceConfigurations)
+	s.soap.RegisterContextHandler("GetAudioEncoderConfigurations", s.libServer.HandleGetAudioEncoderConfigurations)
+	s.soap.RegisterContextHandler("GetAudioOutputs", s.libServer.HandleGetAudioOutputs)
+	s.soap.RegisterContextHandler("GetAudioDecoderConfigurations", s.libServer.HandleGetAudioDecoderConfigurations)
+
+	// DeviceIO alarm I/O family (device service actions). The injected
+	// emptyRelayController keeps every answer an honest empty set.
+	if s.cfg.ONVIF.DeviceIOEnabled {
+		s.soap.RegisterContextHandler("GetRelayOutputs", s.libServer.HandleGetRelayOutputs)
+		s.soap.RegisterContextHandler("SetRelayOutputState", s.libServer.HandleSetRelayOutputState)
+		s.soap.RegisterContextHandler("GetDigitalInputs", s.libServer.HandleGetDigitalInputs)
+		s.soap.RegisterContextHandler("GetDeviceIOServiceCapabilities", s.libServer.HandleGetDeviceIOServiceCapabilities)
 	}
 
 	// Imaging service.

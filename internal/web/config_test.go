@@ -59,9 +59,10 @@ func TestPutConfigDeepMergesAndPreservesSections(t *testing.T) {
 	cookie, csrf := specLogin(t, s)
 
 	// Partial update: change logging.level and onvif.username; the masked
-	// onvif.password round-trips back to the stored secret.
+	// onvif.password round-trips back to the stored secret; the new
+	// onvif.face keys merge like every other key in the section.
 	rec := doReq(t, s, http.MethodPut, "/api/config",
-		`{"logging":{"level":"debug"},"onvif":{"username":"nvr","password":"****"}}`,
+		`{"logging":{"level":"debug"},"onvif":{"username":"nvr","password":"****","media2_enabled":false}}`,
 		authHdr(cookie, csrf))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("PUT config: %d %s", rec.Code, rec.Body.String())
@@ -92,6 +93,9 @@ func TestPutConfigDeepMergesAndPreservesSections(t *testing.T) {
 	}
 	if onvif["password"] != "onvif-secret" {
 		t.Fatalf("masked password must round-trip, got %v", onvif["password"])
+	}
+	if onvif["media2_enabled"] != false {
+		t.Fatalf("merged onvif.media2_enabled = %v, want false", onvif["media2_enabled"])
 	}
 	// Untouched sections survive.
 	cameraSec := cfg["camera"].(map[string]interface{})
@@ -124,6 +128,22 @@ func TestGetConfigMasksSecrets(t *testing.T) {
 	}
 	if data["web"].(map[string]interface{})["password"] != "****" {
 		t.Fatal("web password must be masked")
+	}
+}
+
+// The onvif section of GET /api/config is an explicit key table — the
+// Media2/DeviceIO flags must be listed there or the settings editor can
+// never show them. Not secrets: they round-trip unmasked.
+func TestGetConfigOnvifFaceKeys(t *testing.T) {
+	s, _ := configServer(t, multiSectionYAML)
+	cookie, _ := specLogin(t, s)
+	rec := doReq(t, s, http.MethodGet, "/api/config", "", map[string]string{"Cookie": cookie})
+	onvif := decode(t, rec)["data"].(map[string]interface{})["onvif"].(map[string]interface{})
+	if onvif["media2_enabled"] != true {
+		t.Fatalf("onvif.media2_enabled = %v, want true (mock default)", onvif["media2_enabled"])
+	}
+	if onvif["deviceio_enabled"] != true {
+		t.Fatalf("onvif.deviceio_enabled = %v, want true (mock default)", onvif["deviceio_enabled"])
 	}
 }
 

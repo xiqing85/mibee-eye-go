@@ -13,6 +13,8 @@ import (
 	"syscall"
 	"time"
 
+	onvifserver "github.com/mickeyzzc/onvif-go/v2/server"
+
 	gbdev "github.com/mickeyzzc/gb28181-go/device"
 	"github.com/xiqing85/mibee-eye-go/internal/ai"
 	"github.com/xiqing85/mibee-eye-go/internal/camera"
@@ -149,10 +151,17 @@ type configAdapter struct {
 func (a *configAdapter) ONVIFUsername() string { return a.cfg.ONVIF.Username }
 func (a *configAdapter) ONVIFPassword() string { return a.cfg.ONVIF.Password }
 func (a *configAdapter) ONVIFPort() int        { return a.cfg.ONVIF.Port }
-func (a *configAdapter) RTSPPort() int         { return a.cfg.RTSP.Port }
-func (a *configAdapter) DeviceIP() string      { return a.deviceIP }
-func (a *configAdapter) CameraDevice() string  { return a.cfg.Camera.Device }
-func (a *configAdapter) CameraCodec() string   { return a.cfg.Camera.Codec }
+func (a *configAdapter) ONVIFMedia2Enabled() bool {
+	return a.cfg.ONVIF.Media2Enabled
+}
+
+func (a *configAdapter) ONVIFDeviceIOEnabled() bool {
+	return a.cfg.ONVIF.DeviceIOEnabled
+}
+func (a *configAdapter) RTSPPort() int        { return a.cfg.RTSP.Port }
+func (a *configAdapter) DeviceIP() string     { return a.deviceIP }
+func (a *configAdapter) CameraDevice() string { return a.cfg.Camera.Device }
+func (a *configAdapter) CameraCodec() string  { return a.cfg.Camera.Codec }
 
 // buildCameraFromConfig assembles the capture backend for cfg: camera
 // params (config → defaults), CameraInfo, and the mode switch. Extracted
@@ -267,6 +276,7 @@ func (a *configAdapter) CameraEffectiveWidth() int {
 	w, _ := a.cfg.Camera.EffectiveDims()
 	return w
 }
+
 func (a *configAdapter) CameraEffectiveHeight() int {
 	_, h := a.cfg.Camera.EffectiveDims()
 	return h
@@ -280,6 +290,28 @@ func (a *configAdapter) DeviceSerialNumber() string { return a.cfg.Device.Serial
 func (a *configAdapter) LoggingLevel() string       { return a.cfg.Logging.Level }
 func (a *configAdapter) SnapshotEnabled() bool      { return a.cfg.Snapshot.Enabled }
 func (a *configAdapter) SnapshotQuality() int       { return a.cfg.Snapshot.Quality }
+
+// sharedForceIDR is the force-IDR seam shared by GB28181 IFrameCmd and
+// ONVIF SetSynchronizationPoint: the next encoded frame becomes an IDR
+// when the active source supports runtime requests (v4l2 mode's M2M
+// encoder does; subprocess sources log once — they cannot be signaled
+// mid-stream).
+func sharedForceIDR(cam camera.Camera) func() {
+	var unsupportedLogged bool
+	return func() {
+		forcer, ok := cam.(interface{ ForceIDR() error })
+		if !ok {
+			if !unsupportedLogged {
+				unsupportedLogged = true
+				slog.Warn("force-IDR ignored — camera source does not support runtime IDR requests")
+			}
+			return
+		}
+		if err := forcer.ForceIDR(); err != nil {
+			slog.Warn("force-IDR request failed", "error", err)
+		}
+	}
+}
 
 func main() {
 	configPath := flag.String("config", "configs/config.yaml", "path to config file")
@@ -589,7 +621,10 @@ func main() {
 		info := subPipeline.Info()
 		subInfo = &info
 	}
-	onvifServer, err := onvifgo.New(cfg, localIP, paramManager, snapshotBuffer, subInfo)
+	// ONVIF SetSynchronizationPoint (ver10 + tr2) fires the same
+	// force-IDR seam GB28181 IFrameCmd uses.
+	onvifServer, err := onvifgo.New(cfg, localIP, paramManager, snapshotBuffer, subInfo,
+		onvifserver.WithKeyframeHook(sharedForceIDR(cam)))
 	if err != nil {
 		slog.Error("onvif server init", "error", err)
 		os.Exit(1)
@@ -810,21 +845,9 @@ func main() {
 		// frame when the active source supports it (v4l2 mode's M2M
 		// encoder does; subprocess sources like rpicamvid cannot be
 		// signaled mid-stream and log once).
-		var idrUnsupportedLogged bool
+		forceIDR := sharedForceIDR(cam)
 		gbServer.SetControlHandlers(gbdev.ControlCallbacks{
-			OnForceIFrame: func() {
-				forcer, ok := cam.(interface{ ForceIDR() error })
-				if !ok {
-					if !idrUnsupportedLogged {
-						idrUnsupportedLogged = true
-						slog.Warn("gb28181: IFrameCmd ignored — camera source does not support runtime IDR requests")
-					}
-					return
-				}
-				if err := forcer.ForceIDR(); err != nil {
-					slog.Warn("gb28181: IFrameCmd force IDR failed", "error", err)
-				}
-			},
+			OnForceIFrame: forceIDR,
 			// GB/T 28181 RecordCmd (§9.3.2): platform-requested manual
 			// recording. StopRecord pauses the (config-enabled) recorder's
 			// segment writing; Record resumes at a fresh segment boundary.

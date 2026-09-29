@@ -10,6 +10,24 @@ Notable changes to MiBee Eye (Go implementation) are documented here.
 > Released synchronized minors: v0.3.0 (GB/T 28181-2022 device-role
 > coverage), v0.4.0 (substream, rotation, browser-hardened web UI).
 
+## [0.5.0] — 2026-09-29
+
+Synchronized minor release with [mibee-eye-rs](https://github.com/xiqing85/mibee-eye-rs/releases/tag/v0.5.0) and [mibee-eye-notebook](https://github.com/xiqing85/mibee-eye-notebook/releases/tag/v0.5.0) (same version, same day).
+
+### Added
+
+- **ONVIF capability adoption** (onvif-go v2.3.0): the Media2
+  (ver20/tr2) service face at `/onvif/media2_service` (Profile-T entry
+  path, GetServices advertisement behind `onvif.media2_enabled`,
+  default on); the DeviceIO action family with honest empty I/O sets
+  behind `onvif.deviceio_enabled` (no relay/audio/DI hardware —
+  nothing fabricated); the ver10 video-encoder configuration family
+  (list + options from the advertised profiles);
+  `SetSynchronizationPoint` on both media faces firing the same
+  force-IDR seam GB28181 IFrameCmd uses (v4l2 mode's M2M encoder
+  punctures the GOP; subprocess sources log once); and the OSD store
+  loop (empty until a client creates entries).
+
 ## [0.4.0] — 2026-09-27
 
 Synchronized minor release with [mibee-eye-rs](https://github.com/xiqing85/mibee-eye-rs/releases/tag/v0.4.0) and [mibee-eye-notebook](https://github.com/xiqing85/mibee-eye-notebook/releases/tag/v0.4.0) (same version, same day).

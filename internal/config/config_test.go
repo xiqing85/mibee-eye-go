@@ -105,6 +105,12 @@ logging: {}
 	if cfg.ONVIF.Password != "" {
 		t.Errorf("ONVIF.Password = %q, want empty", cfg.ONVIF.Password)
 	}
+	if !cfg.ONVIF.Media2Enabled {
+		t.Error("ONVIF.Media2Enabled default = false, want true")
+	}
+	if !cfg.ONVIF.DeviceIOEnabled {
+		t.Error("ONVIF.DeviceIOEnabled default = false, want true")
+	}
 
 	// Device defaults
 	if cfg.Device.Name != "Pi Camera V1" {
@@ -277,6 +283,8 @@ func TestEnvOverride(t *testing.T) {
 	t.Setenv("MIBEE_EYE_ONVIF_PORT", "9080")
 	t.Setenv("MIBEE_EYE_ONVIF_USERNAME", "envonvif")
 	t.Setenv("MIBEE_EYE_ONVIF_PASSWORD", "envonvifpass")
+	t.Setenv("MIBEE_EYE_ONVIF_MEDIA2_ENABLED", "false")
+	t.Setenv("MIBEE_EYE_ONVIF_DEVICEIO_ENABLED", "false")
 	t.Setenv("MIBEE_EYE_CAMERA_DEVICE", "/dev/videoEnv")
 	t.Setenv("MIBEE_EYE_CAMERA_FFMPEG_BIN", "/opt/ffmpeg")
 	t.Setenv("MIBEE_EYE_CAMERA_STILL_BIN", "/opt/rpicam-still")
@@ -368,6 +376,12 @@ logging:
 	}
 	if cfg.ONVIF.Password != "envonvifpass" {
 		t.Errorf("ONVIF.Password = %q, want envonvifpass (env override)", cfg.ONVIF.Password)
+	}
+	if cfg.ONVIF.Media2Enabled {
+		t.Error("ONVIF.Media2Enabled = true, want false (env override)")
+	}
+	if cfg.ONVIF.DeviceIOEnabled {
+		t.Error("ONVIF.DeviceIOEnabled = true, want false (env override)")
 	}
 	if cfg.Device.Name != "Env Camera" {
 		t.Errorf("Device.Name = %q, want Env Camera (env override)", cfg.Device.Name)
@@ -734,7 +748,6 @@ gb28181:
 	if cfg.GB28181.HeartbeatTimeoutCount != 5 {
 		t.Errorf("GB28181.HeartbeatTimeoutCount = %d, want 5 (env override)", cfg.GB28181.HeartbeatTimeoutCount)
 	}
-
 }
 
 func TestGB28181Transport_Default(t *testing.T) {
