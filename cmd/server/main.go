@@ -29,6 +29,7 @@ import (
 	"github.com/xiqing85/mibee-eye-go/internal/netutil"
 	"github.com/xiqing85/mibee-eye-go/internal/onvif"
 	onvifgo "github.com/xiqing85/mibee-eye-go/internal/onvif/onvifgo"
+	"github.com/xiqing85/mibee-eye-go/internal/otelx"
 	"github.com/xiqing85/mibee-eye-go/internal/recording"
 	"github.com/xiqing85/mibee-eye-go/internal/rtmp"
 	"github.com/xiqing85/mibee-eye-go/internal/rtsp"
@@ -337,6 +338,18 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 
+	// Internal call-chain span export (SPEC v1 §3.3 + appendix A #37):
+	// noop tracer unless observability.otlp_endpoint is set; collector
+	// failures fail open with one log line.
+	shutdownOtel := otelx.Init(ctx, cfg.Observability.OTLPEndpoint)
+	defer func() {
+		sctx, scancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer scancel()
+		if err := shutdownOtel(sctx); err != nil {
+			slog.Warn("otel: shutdown", "error", err)
+		}
+	}()
+
 	localIP := netutil.DetectLocalIP()
 	slog.Info("MiBee Eye starting", "version", version, "fallback_ip", localIP)
 	adapter := &configAdapter{cfg: cfg, deviceIP: localIP}
@@ -598,6 +611,7 @@ func main() {
 			UDPRTCPPort:    cfg.RTSP.UDPRTCPPort,
 		})
 		rtspServer.SetFrameSource(rtspSub.Channel)
+		rtspServer.SetConnObserver(metricsCollector.IncRTSPSession)
 
 		if err := rtspServer.Start(ctx); err != nil {
 			slog.Error("rtsp server start", "error", err)
@@ -629,6 +643,8 @@ func main() {
 		slog.Error("onvif server init", "error", err)
 		os.Exit(1)
 	}
+	// Per-action ONVIF request counting (SPEC appendix A #38).
+	onvifServer.SetRequestObserver(metricsCollector.IncONVIFRequest)
 	// ONVIF MotionAlarm rides the alarm bridge's accepted rising edges
 	// (events disabled / no NVR subscription → no-ops inside).
 	if alarmBridge != nil {
@@ -805,6 +821,10 @@ func main() {
 		}
 		devCfg.RegisterAuthenticator = authenticator
 		gbServer = gbdev.New(devCfg, toDeviceInfo(cfg.Device), auHubFrameSource{hub: auHub})
+		// Library observability seam (SPEC appendix A #38): registration
+		// lifecycle, keepalive failures, INVITE sessions and PS egress
+		// land on the Prometheus collector.
+		gbServer.SetMetricsHooks(metricsCollector)
 		// Wire the recording index for RecordInfo queries (nil when recording disabled).
 		if recWriter != nil {
 			gbServer.SetRecordingIndex(recordingIndexAdapter{idx: recWriter.Index(), root: cfg.Recording.StoragePath})
@@ -873,6 +893,44 @@ func main() {
 	}
 
 	// --- Step 7: Metrics ---
+	// The poll loop runs regardless of the dedicated :9100 listener —
+	// the web-port /metrics handler serves the same collector (SPEC
+	// appendix A #38) and needs the resource gauges too.
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				metricsCollector.SetFramesDropped(auHub.DroppedAUs())
+				if rtspServer != nil {
+					metricsCollector.SetRTSPClients(rtspServer.ClientCount())
+				}
+				// Camera auto-restarts on failure, so it's effectively always alive
+				// once Start() succeeds. Set to 1 unconditionally.
+				metricsCollector.SetCameraAlive(true)
+				if aiService != nil {
+					metricsCollector.SetAIInferences(aiService.Inferences())
+				}
+				// Resource gauges from the observe sampler (the same
+				// numbers /api/metrics/summary serves).
+				snap := mainObserve.Snapshot()
+				metricsCollector.SetResourceSample(
+					snap.SystemCPUPerct,
+					snap.ProcCPUPerct,
+					snap.MemTotal,
+					snap.MemAvailable,
+					snap.RSSBytes,
+					snap.OpenFDs,
+					snap.NetRX,
+					snap.NetTX,
+				)
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
 	if cfg.Metrics.Enabled {
 		metricsMux := http.NewServeMux()
 		metricsMux.Handle("/metrics", metricsCollector)
@@ -891,27 +949,6 @@ func main() {
 			}
 		}()
 		defer metricsServer.Close()
-
-		// Poll loop: snapshot camera drops, AUHub drops, RTSP clients, camera alive
-		go func() {
-			ticker := time.NewTicker(5 * time.Second)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-ticker.C:
-					metricsCollector.SetFramesDropped(auHub.DroppedAUs())
-					if rtspServer != nil {
-						metricsCollector.SetRTSPClients(rtspServer.ClientCount())
-					}
-					// Camera auto-restarts on failure, so it's effectively always alive
-					// once Start() succeeds. Set to 1 unconditionally.
-					metricsCollector.SetCameraAlive(true)
-					if aiService != nil {
-						metricsCollector.SetAIInferences(aiService.Inferences())
-					}
-				}
-			}
-		}()
 		slog.Info("metrics: enabled", "port", cfg.Metrics.Port)
 	} else {
 		slog.Info("metrics: disabled")

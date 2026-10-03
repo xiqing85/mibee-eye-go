@@ -150,6 +150,12 @@ type MetricsConfig struct {
 	Port    int  `yaml:"port"`    // Metrics HTTP server port (default: 9100)
 }
 
+// ObservabilityConfig holds internal call-chain tracing settings (SPEC
+// v1 §3.3 + appendix A #37). Empty OTLPEndpoint = tracing disabled.
+type ObservabilityConfig struct {
+	OTLPEndpoint string `yaml:"otlp_endpoint"` // OTLP gRPC endpoint (e.g. "http://collector:4317")
+}
+
 // SnapshotConfig holds snapshot endpoint settings.
 type SnapshotConfig struct {
 	Enabled bool `yaml:"enabled"` // Enable the snapshot endpoint (default: true)
@@ -243,19 +249,20 @@ type AIConfig struct {
 
 // Config is the top-level configuration for MiBee Eye.
 type Config struct {
-	Camera    CameraConfig    `yaml:"camera"`
-	RTSP      RTSPConfig      `yaml:"rtsp"`
-	ONVIF     ONVIFConfig     `yaml:"onvif"`
-	Device    DeviceConfig    `yaml:"device"`
-	Logging   LoggingConfig   `yaml:"logging"`
-	Web       WebConfig       `yaml:"web"`
-	Metrics   MetricsConfig   `yaml:"metrics"`
-	Snapshot  SnapshotConfig  `yaml:"snapshot"`
-	RTMP      RTMPConfig      `yaml:"rtmp"`
-	HLS       HLSConfig       `yaml:"hls"`
-	GB28181   GB28181Config   `yaml:"gb28181"`
-	Recording RecordingConfig `yaml:"recording"`
-	AI        AIConfig        `yaml:"ai"`
+	Camera        CameraConfig        `yaml:"camera"`
+	RTSP          RTSPConfig          `yaml:"rtsp"`
+	ONVIF         ONVIFConfig         `yaml:"onvif"`
+	Device        DeviceConfig        `yaml:"device"`
+	Logging       LoggingConfig       `yaml:"logging"`
+	Web           WebConfig           `yaml:"web"`
+	Metrics       MetricsConfig       `yaml:"metrics"`
+	Observability ObservabilityConfig `yaml:"observability"`
+	Snapshot      SnapshotConfig      `yaml:"snapshot"`
+	RTMP          RTMPConfig          `yaml:"rtmp"`
+	HLS           HLSConfig           `yaml:"hls"`
+	GB28181       GB28181Config       `yaml:"gb28181"`
+	Recording     RecordingConfig     `yaml:"recording"`
+	AI            AIConfig            `yaml:"ai"`
 }
 
 // DefaultConfig returns a Config with all default values.
@@ -334,6 +341,9 @@ func DefaultConfig() *Config {
 		Metrics: MetricsConfig{
 			Enabled: true,
 			Port:    9100,
+		},
+		Observability: ObservabilityConfig{
+			OTLPEndpoint: "",
 		},
 		Snapshot: SnapshotConfig{
 			Enabled: true,
@@ -528,6 +538,7 @@ func applyEnvOverrides(cfg *Config) {
 	overrideDuration("MIBEE_EYE_WEB_IDLE_TIMEOUT", &cfg.Web.IdleTimeout)
 	// Metrics section
 	overrideBool("MIBEE_EYE_METRICS_ENABLED", &cfg.Metrics.Enabled)
+	overrideString("MIBEE_EYE_OBSERVABILITY_OTLP_ENDPOINT", &cfg.Observability.OTLPEndpoint)
 	overrideInt("MIBEE_EYE_METRICS_PORT", &cfg.Metrics.Port)
 	// Device section
 	overrideString("MIBEE_EYE_DEVICE_NAME", &cfg.Device.Name)

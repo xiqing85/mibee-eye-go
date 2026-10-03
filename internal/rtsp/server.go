@@ -16,6 +16,9 @@ import (
 	"github.com/bluenviron/gortsplib/v5/pkg/format"
 	"github.com/bluenviron/gortsplib/v5/pkg/format/rtph264"
 	"github.com/bluenviron/gortsplib/v5/pkg/liberrors"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/xiqing85/mibee-eye-go/internal/h264"
 )
@@ -59,6 +62,10 @@ type mount struct {
 // Server wraps gortsplib for H.264 streaming.
 // It reads H.264 access units from a frame source channel and
 // distributes them as RTP packets to connected RTSP clients.
+// tracer names the RTSP session spans (noop unless otelx installed a
+// real provider — SPEC appendix A #37).
+var tracer = otel.Tracer("mibee-eye")
+
 type Server struct {
 	cfg        Config
 	rtspServer *gortsplib.Server
@@ -71,7 +78,21 @@ type Server struct {
 	// right stream (SetSetup records it).
 	sessions map[*gortsplib.ServerSession]*mount
 
+	// connObserver, when set, fires once per accepted RTSP connection
+	// (metrics + tracing — SPEC appendix A #37/#38). Nil-safe.
+	connObserver func()
+
+	// In-flight rtsp_session spans keyed by connection — ended in
+	// OnConnClose (SPEC appendix A #37).
+	connSpans sync.Map
+
 	wg sync.WaitGroup
+}
+
+// SetConnObserver installs the per-connection hook (metrics collector
+// bump + OTel span from the host).
+func (s *Server) SetConnObserver(f func()) {
+	s.connObserver = f
 }
 
 // New creates a new RTSP server instance. Call Start() to begin listening.
@@ -216,11 +237,32 @@ func (s *Server) ClientCount() int {
 // --- gortsplib.ServerHandler interface ---
 
 // OnConnOpen is called when a new RTSP connection is opened.
-func (s *Server) OnConnOpen(_ *gortsplib.ServerHandlerOnConnOpenCtx) {
+func (s *Server) OnConnOpen(ctx *gortsplib.ServerHandlerOnConnOpenCtx) {
+	if s.connObserver != nil {
+		s.connObserver()
+	}
+	// Call-chain span (appendix A #37): one per accepted connection,
+	// ended in OnConnClose; the noop tracer costs nothing when OTLP
+	// export is off.
+	_, span := tracer.Start(context.Background(), "rtsp_session")
+	if ctx.Conn != nil && ctx.Conn.NetConn() != nil {
+		span.SetAttributes(attribute.String("net.peer.addr",
+			ctx.Conn.NetConn().RemoteAddr().String()))
+	}
+	if ctx.Conn != nil {
+		s.connSpans.Store(ctx.Conn, span)
+	} else {
+		span.End()
+	}
 }
 
 // OnConnClose is called when an RTSP connection is closed.
-func (s *Server) OnConnClose(_ *gortsplib.ServerHandlerOnConnCloseCtx) {
+func (s *Server) OnConnClose(ctx *gortsplib.ServerHandlerOnConnCloseCtx) {
+	if ctx.Conn != nil {
+		if v, ok := s.connSpans.LoadAndDelete(ctx.Conn); ok {
+			v.(trace.Span).End()
+		}
+	}
 }
 
 // OnStreamWriteError handles per-packet write errors (e.g., "write queue is full").

@@ -17,12 +17,15 @@
 package onvifgo
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -47,6 +50,16 @@ type Server struct {
 	advertiseIP string
 	httpServer  *http.Server
 	mux         *http.ServeMux
+
+	// requestObserver, when set, receives each ONVIF SOAP action's local
+	// name (e.g. "GetDeviceInformation") after the request completes —
+	// wired to the Prometheus collector (SPEC appendix A #38). Nil-safe.
+	requestObserver func(action string)
+}
+
+// SetRequestObserver installs the per-request action hook.
+func (s *Server) SetRequestObserver(f func(action string)) {
+	s.requestObserver = f
 }
 
 // New builds the composed server. advertiseIP is the device's own IP used
@@ -151,7 +164,7 @@ func New(cfg *config.Config, advertiseIP string, params *camera.ParamManager, sn
 		media2.RegisterContextHandler("GetStreamUri", s.libServer.HandleMedia2GetStreamUri)
 		media2.RegisterContextHandler("SetSynchronizationPoint", s.libServer.HandleMedia2SetSynchronizationPoint)
 		media2.RegisterContextHandler("GetVideoEncoderConfigurations", s.libServer.HandleMedia2GetVideoEncoderConfigurations)
-	media2.RegisterContextHandler("GetServiceCapabilities", s.libServer.HandleMedia2GetServiceCapabilities)
+		media2.RegisterContextHandler("GetServiceCapabilities", s.libServer.HandleMedia2GetServiceCapabilities)
 		mux.Handle("/onvif/media2_service", media2)
 	}
 	mux.Handle("/", probeSniffer{soap: s.soap, probe: s.responder})
@@ -303,13 +316,68 @@ func (s *Server) StopDiscovery() {
 	s.responder.Stop()
 }
 
+// observeRequests wraps the mux with the action counter: the SOAP
+// envelope body is tee'd into a capped buffer while the handler reads,
+// then the first Body child's local name is reported (best effort —
+// non-SOAP probes like WS-Discovery count as "probe").
+func (s *Server) observeRequests(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.requestObserver == nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		var peek bytes.Buffer
+		if r.Body != nil {
+			r.Body = struct {
+				io.Reader
+				io.Closer
+			}{
+				Reader: io.TeeReader(io.LimitReader(r.Body, peekLimit), &peek),
+				Closer: r.Body,
+			}
+		}
+		next.ServeHTTP(w, r)
+		s.requestObserver(soapActionFromEnvelope(peek.Bytes()))
+	})
+}
+
+// peekLimit caps the envelope prefix kept for action extraction.
+const peekLimit = 16 << 10
+
+// soapActionFromEnvelope extracts the SOAP Body child's local name
+// ("GetDeviceInformation" etc.); empty when nothing parseable was read.
+func soapActionFromEnvelope(buf []byte) string {
+	body := bytes.Index(buf, []byte(":Body>"))
+	if body < 0 {
+		body = bytes.Index(buf, []byte("Body>"))
+		if body < 0 {
+			return "probe"
+		}
+	}
+	rest := buf[body:]
+	lt := bytes.IndexByte(rest, '<')
+	if lt < 0 {
+		return "unknown"
+	}
+	tag := rest[lt+1:]
+	end := bytes.IndexAny(tag, " >/")
+	if end < 0 {
+		return "unknown"
+	}
+	name := string(tag[:end])
+	if i := strings.LastIndexByte(name, ':'); i >= 0 {
+		name = name[i+1:]
+	}
+	return name
+}
+
 // Start starts the ONVIF HTTP server and blocks until ctx is cancelled or
 // the listener fails.
 func (s *Server) Start(ctx context.Context) error {
 	addr := fmt.Sprintf(":%d", s.cfg.ONVIF.Port)
 	s.httpServer = &http.Server{
 		Addr:              addr,
-		Handler:           s.mux,
+		Handler:           s.observeRequests(s.mux),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      30 * time.Second,

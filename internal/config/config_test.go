@@ -998,3 +998,30 @@ func TestSubstreamValidateRejectsUpscale(t *testing.T) {
 		t.Fatal("substream larger than the main stream must be rejected")
 	}
 }
+
+func TestObservabilityDefaultsAndParsing(t *testing.T) {
+	cfg, err := Load(writeTempYAML(t, ""))
+	if err != nil {
+		t.Fatalf("load empty: %v", err)
+	}
+	if cfg.Observability.OTLPEndpoint != "" {
+		t.Errorf("default otlp_endpoint = %q, want empty", cfg.Observability.OTLPEndpoint)
+	}
+
+	cfg, err = Load(writeTempYAML(t, "observability:\n  otlp_endpoint: \"http://collector:4317\"\n"))
+	if err != nil {
+		t.Fatalf("load section: %v", err)
+	}
+	if cfg.Observability.OTLPEndpoint != "http://collector:4317" {
+		t.Errorf("otlp_endpoint = %q", cfg.Observability.OTLPEndpoint)
+	}
+
+	t.Setenv("MIBEE_EYE_OBSERVABILITY_OTLP_ENDPOINT", "http://env:4317")
+	cfg, err = Load(writeTempYAML(t, ""))
+	if err != nil {
+		t.Fatalf("load env: %v", err)
+	}
+	if cfg.Observability.OTLPEndpoint != "http://env:4317" {
+		t.Errorf("env override = %q", cfg.Observability.OTLPEndpoint)
+	}
+}

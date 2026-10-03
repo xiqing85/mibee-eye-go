@@ -15,6 +15,9 @@ import (
 	"time"
 
 	"github.com/xiqing85/mibee-eye-go/internal/h264"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 )
 
 // FrameSource supplies decoded RGB24 frames for inference: the ffmpeg
@@ -202,6 +205,10 @@ func (s *Service) Start(ctx context.Context) {
 	go s.runLoop(ctx, s.decoder.Frames())
 }
 
+// tracer names the AI inference spans (noop unless otelx installed a
+// real provider — SPEC appendix A #37).
+var tracer = otel.Tracer("mibee-eye")
+
 // runLoop consumes decoded frames and runs at most one inference per
 // interval. Exposed for tests, which feed synthetic frame channels.
 func (s *Service) runLoop(ctx context.Context, frames <-chan Frame) {
@@ -217,7 +224,16 @@ func (s *Service) runLoop(ctx context.Context, frames <-chan Frame) {
 		lastRun = time.Now()
 		frameNo := s.frame.Add(1)
 
+		// Call-chain span (SPEC appendix A #37): one per executed
+		// inference; the noop tracer costs nothing when OTLP is off.
+		inferCtx, span := tracer.Start(ctx, "ai_inference")
+		span.SetAttributes(attribute.String("model", s.ModelName()))
 		detections, err := s.currentDetector().Detect(&frame, s.opts.VideoW, s.opts.VideoH)
+		if err != nil {
+			span.SetStatus(codes.Error, err.Error())
+		}
+		span.End()
+		_ = inferCtx
 		if err != nil {
 			slog.Warn("ai: inference error", "error", err)
 			s.storeSnapshot(nil)
