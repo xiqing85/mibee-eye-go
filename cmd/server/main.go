@@ -913,8 +913,10 @@ func main() {
 					metricsCollector.SetAIInferences(aiService.Inferences())
 				}
 				// Resource gauges from the observe sampler (the same
-				// numbers /api/metrics/summary serves).
-				snap := mainObserve.Snapshot()
+				// numbers /api/metrics/summary serves). NOTE: the web
+				// server owns the sampled Observe — mainObserve (the log
+				// tee) is a separate instance that never samples.
+				snap := webServer.Observe().Snapshot()
 				metricsCollector.SetResourceSample(
 					snap.SystemCPUPerct,
 					snap.ProcCPUPerct,
