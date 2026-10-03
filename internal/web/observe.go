@@ -7,6 +7,11 @@
 package web
 
 import (
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
+
 	"context"
 	"fmt"
 	"io"
@@ -232,6 +237,9 @@ type RequestEntry struct {
 	Status     int     `json:"status"`
 	DurationMS float64 `json:"duration_ms"`
 	TS         int64   `json:"ts"`
+	// TraceID of the request's span (SPEC v1 §3.3): empty when tracing
+	// is disabled — correlates /api/requests with external collectors.
+	TraceID string `json:"trace_id,omitempty"`
 }
 
 // Observe is the shared observability state owned by the web Server.
@@ -553,7 +561,18 @@ func (s *Server) observeMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("X-Request-Id", id)
 		intercepted := &statusInterceptor{ResponseWriter: w}
 		start := time.Now()
-		next.ServeHTTP(intercepted, r)
+		// Call-chain span (SPEC v1 §3.3 + appendix A #37): adopts an
+		// inbound W3C traceparent as parent; noop tracer when OTLP is
+		// off (zero allocations beyond the noop span).
+		parentCtx := otel.GetTextMapPropagator().Extract(r.Context(),
+			propagation.HeaderCarrier(r.Header))
+		spanCtx, span := otel.Tracer("mibee-eye").Start(parentCtx,
+			r.Method+" "+r.URL.Path,
+			trace.WithAttributes(
+				attribute.String("http.request_id", id),
+			))
+		next.ServeHTTP(intercepted, r.WithContext(spanCtx))
+		span.End()
 		if r.ContentLength > 0 {
 			s.observe.HTTPRX.Add(uint64(r.ContentLength))
 		}
@@ -565,6 +584,10 @@ func (s *Server) observeMiddleware(next http.Handler) http.Handler {
 			if status == 0 {
 				status = http.StatusOK
 			}
+			var traceID string
+			if sc := trace.SpanContextFromContext(spanCtx); sc.HasTraceID() {
+				traceID = sc.TraceID().String()
+			}
 			s.observe.AddRequest(RequestEntry{
 				ID:         id,
 				Method:     r.Method,
@@ -572,6 +595,7 @@ func (s *Server) observeMiddleware(next http.Handler) http.Handler {
 				Status:     status,
 				DurationMS: float64(time.Since(start).Microseconds()) / 1000.0,
 				TS:         time.Now().Unix(),
+				TraceID:    traceID,
 			})
 		}
 	})

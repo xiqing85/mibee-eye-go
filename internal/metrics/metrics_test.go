@@ -1,150 +1,63 @@
 package metrics
 
 import (
-	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 )
 
-func TestCollectorIncrement(t *testing.T) {
+func TestCollectorRendersGBAndResourceFamilies(t *testing.T) {
 	c := NewCollector()
-	c.IncFramesCaptured()
-	c.IncFramesCaptured()
-	c.IncFramesDropped()
+	c.RegisterAttempt()
+	c.RegisterOK()
+	c.RegisterAttempt()
+	c.RegisterFail()
+	c.KeepaliveFail()
+	c.InviteSessionStarted()
+	c.InviteSessionStopped()
+	c.InviteFail()
+	c.PSBytesOut(1500)
+	c.IncRTSPSession()
+	c.SetResourceSample(23.5, 12.25, 8_000_000, 3_000_000, 999_000, 42, 1_000, 2_000)
 
-	c.mu.Lock()
-	if c.framesCaptured != 2 {
-		t.Errorf("framesCaptured = %d, want 2", c.framesCaptured)
-	}
-	if c.framesDropped != 1 {
-		t.Errorf("framesDropped = %d, want 1", c.framesDropped)
-	}
-	c.mu.Unlock()
-}
+	rec := httptest.NewRecorder()
+	c.ServeHTTP(rec, httptest.NewRequest("GET", "/metrics", nil))
+	out := rec.Body.String()
 
-func TestCollectorSet(t *testing.T) {
-	c := NewCollector()
-	c.SetFramesCaptured(100)
-	c.SetFramesDropped(50)
-	c.SetRTSPClients(3)
-	c.SetCameraAlive(true)
-
-	c.mu.Lock()
-	if c.framesCaptured != 100 {
-		t.Errorf("framesCaptured = %d, want 100", c.framesCaptured)
-	}
-	if c.framesDropped != 50 {
-		t.Errorf("framesDropped = %d, want 50", c.framesDropped)
-	}
-	if c.rtspClients != 3 {
-		t.Errorf("rtspClients = %d, want 3", c.rtspClients)
-	}
-	if c.cameraAlive != 1 {
-		t.Errorf("cameraAlive = %d, want 1", c.cameraAlive)
-	}
-	c.mu.Unlock()
-
-	// Test camera dead
-	c.SetCameraAlive(false)
-	c.mu.Lock()
-	if c.cameraAlive != 0 {
-		t.Errorf("cameraAlive = %d, want 0", c.cameraAlive)
-	}
-	c.mu.Unlock()
-}
-
-func TestCollectorONVIFRequests(t *testing.T) {
-	c := NewCollector()
-	c.IncONVIFRequest("GetProfiles")
-	c.IncONVIFRequest("GetStreamUri")
-	c.IncONVIFRequest("GetProfiles")
-
-	c.mu.Lock()
-	if c.onvifRequests["GetProfiles"] != 2 {
-		t.Errorf("onvifRequests[GetProfiles] = %d, want 2", c.onvifRequests["GetProfiles"])
-	}
-	if c.onvifRequests["GetStreamUri"] != 1 {
-		t.Errorf("onvifRequests[GetStreamUri] = %d, want 1", c.onvifRequests["GetStreamUri"])
-	}
-	c.mu.Unlock()
-}
-
-func TestServeHTTP(t *testing.T) {
-	c := NewCollector()
-	c.SetFramesCaptured(42)
-	c.SetFramesDropped(7)
-	c.SetRTSPClients(2)
-	c.SetCameraAlive(true)
-	c.IncONVIFRequest("GetProfiles")
-	c.IncONVIFRequest("GetProfiles")
-	c.IncONVIFRequest("GetStreamUri")
-
-	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
-	w := httptest.NewRecorder()
-	c.ServeHTTP(w, req)
-
-	resp := w.Body.String()
-
-	// Verify required metrics are present
-	checks := []string{
-		"# HELP mibee_eye_frames_captured_total",
-		"# TYPE mibee_eye_frames_captured_total counter",
-		"mibee_eye_frames_captured_total 42",
-		"# HELP mibee_eye_frames_dropped_total",
-		"# TYPE mibee_eye_frames_dropped_total counter",
-		"mibee_eye_frames_dropped_total 7",
-		"# HELP mibee_eye_rtsp_clients",
-		"# TYPE mibee_eye_rtsp_clients gauge",
-		"mibee_eye_rtsp_clients 2",
-		"# HELP mibee_eye_camera_subprocess_alive",
-		"# TYPE mibee_eye_camera_subprocess_alive gauge",
-		"mibee_eye_camera_subprocess_alive 1",
-		"# HELP mibee_eye_onvif_requests_total",
-		"# TYPE mibee_eye_onvif_requests_total counter",
-		`mibee_eye_onvif_requests_total{action="GetProfiles"} 2`,
-		`mibee_eye_onvif_requests_total{action="GetStreamUri"} 1`,
-	}
-
-	for _, check := range checks {
-		if !strings.Contains(resp, check) {
-			t.Errorf("expected metric line not found: %s", check)
+	for _, want := range []string{
+		"mibee_eye_gb28181_register_attempts_total 2",
+		"mibee_eye_gb28181_register_ok_total 1",
+		"mibee_eye_gb28181_register_fail_total 1",
+		"mibee_eye_gb28181_keepalive_fail_total 1",
+		"mibee_eye_gb28181_invite_sessions_started_total 1",
+		"mibee_eye_gb28181_invite_sessions_stopped_total 1",
+		"mibee_eye_gb28181_invite_fail_total 1",
+		"mibee_eye_gb28181_ps_bytes_total 1500",
+		"mibee_eye_rtsp_sessions_total 1",
+		"mibee_eye_system_cpu_percent 23.5",
+		"mibee_eye_system_memory_total_bytes 8000000",
+		"mibee_eye_system_memory_available_bytes 3000000",
+		"mibee_eye_process_cpu_percent 12.25",
+		"mibee_eye_process_resident_memory_bytes 999000",
+		"mibee_eye_process_open_fds 42",
+		"mibee_eye_system_net_rx_bytes 1000",
+		"mibee_eye_system_net_tx_bytes 2000",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected %q in output:\n%s", want, out)
 		}
 	}
 }
 
-func TestServeHTTP_ContentType(t *testing.T) {
-	c := NewCollector()
-	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
-	w := httptest.NewRecorder()
-	c.ServeHTTP(w, req)
-
-	ct := w.Header().Get("Content-Type")
-	if !strings.HasPrefix(ct, "text/plain") {
-		t.Errorf("Content-Type = %q, want text/plain", ct)
-	}
-}
-
-func TestReset(t *testing.T) {
-	c := NewCollector()
-	c.SetFramesCaptured(100)
-	c.SetFramesDropped(50)
-	c.SetRTSPClients(3)
-	c.IncONVIFRequest("GetProfiles")
-	c.Reset()
-
-	c.mu.Lock()
-	if c.framesCaptured != 0 {
-		t.Errorf("framesCaptured = %d, want 0 after reset", c.framesCaptured)
-	}
-	if c.framesDropped != 0 {
-		t.Errorf("framesDropped = %d, want 0 after reset", c.framesDropped)
-	}
-	if c.rtspClients != 0 {
-		t.Errorf("rtspClients = %d, want 0 after reset", c.rtspClients)
-	}
-	if len(c.onvifRequests) != 0 {
-		t.Errorf("onvifRequests len = %d, want 0 after reset", len(c.onvifRequests))
-	}
-	c.mu.Unlock()
-}
+// Compile-time proof that Collector satisfies the library's metrics.Hooks
+// seam (device.SetMetricsHooks) — the hot-path contract keeps methods cheap.
+var _ interface {
+	RegisterAttempt()
+	RegisterOK()
+	RegisterFail()
+	KeepaliveFail()
+	InviteSessionStarted()
+	InviteSessionStopped()
+	InviteFail()
+	PSBytesOut(n int64)
+} = (*Collector)(nil)

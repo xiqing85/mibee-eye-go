@@ -10,6 +10,27 @@ Notable changes to MiBee Eye (Go implementation) are documented here.
 > Released synchronized minors: v0.3.0 (GB/T 28181-2022 device-role
 > coverage), v0.4.0 (substream, rotation, browser-hardened web UI).
 
+
+## [Unreleased]
+
+### Added
+
+- **OTLP call-chain span export** (SPEC v1 §3.3 + appendix A #37): new
+  `observability.otlp_endpoint` config key (default empty = noop tracer,
+  zero cost). When set, spans export for HTTP requests (W3C traceparent
+  adopted, trace ids surfaced in `/api/requests` entries), RTSP
+  sessions, and AI inference to external collectors; unreachable
+  collectors fail open.
+- **`/metrics` parity** (appendix A #38): system/process resource gauges
+  (CPU, memory, FDs, NIC counters) mirror the JSON summary onto the
+  scrape surface; GB28181 lifecycle counters wired through the library's
+  `metrics.Hooks` seam (REGISTER attempts/ok/fail, keepalive failures,
+  INVITE sessions, PS egress); RTSP accepted-session and per-action ONVIF
+  request counters (previously exported-but-dead).
+- The metrics poll loop now runs even when the dedicated :9100 listener
+  is disabled — the web-port `/metrics` handler serves the same
+  collector.
+
 ## [0.5.0] — 2026-09-29
 
 Synchronized minor release with [mibee-eye-rs](https://github.com/xiqing85/mibee-eye-rs/releases/tag/v0.5.0) and [mibee-eye-notebook](https://github.com/xiqing85/mibee-eye-notebook/releases/tag/v0.5.0) (same version, same day).

@@ -214,6 +214,14 @@ metrics:
   # Metrics HTTP port (default: 9100, conflicts with Prometheus node_exporter)
   port: 9100
 
+# Observability settings (SPEC v1 §3.3 + appendix A #37)
+observability:
+  # OTLP gRPC endpoint for internal call-chain span export (Jaeger/Tempo/
+  # SigNoz collector, convention "http://collector:4317"). Empty = tracing
+  # disabled (noop tracer, zero cost); unreachable collector fails open.
+  # env: MIBEE_EYE_OBSERVABILITY_OTLP_ENDPOINT
+  otlp_endpoint: ""
+
 # GB28181 SIP registration settings (disabled by default)
 gb28181:
   # Enable GB28181 registration with a SIP platform (default: false)
