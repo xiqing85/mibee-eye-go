@@ -257,7 +257,14 @@ func (s *Server) registerActions() {
 // SPEC single-camera id, State=true marks the rise, Targets carries
 // the detection count.
 func (s *Server) PublishMotionAlarm(targets int) {
-	s.libServer.PublishEvent(onvifserver.Event{
+	s.libServer.PublishEvent(motionAlarmEvent(targets))
+}
+
+// motionAlarmEvent is the wire payload of one accepted AI rising edge,
+// factored out so the interop test can pin it against the library's
+// client-side motion parser (what NVRs consuming this camera run).
+func motionAlarmEvent(targets int) onvifserver.Event {
+	return onvifserver.Event{
 		Topic: "tns1:VideoSource/MotionAlarm",
 		Source: []onvifserver.SimpleItem{
 			{Name: "Source", Value: "0"},
@@ -266,7 +273,7 @@ func (s *Server) PublishMotionAlarm(targets int) {
 			{Name: "State", Value: "true"},
 			{Name: "Targets", Value: strconv.Itoa(targets)},
 		},
-	})
+	}
 }
 
 // newResponder builds the WS-Discovery responder. XAddrs are pinned to the
