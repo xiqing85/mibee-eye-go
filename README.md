@@ -109,7 +109,7 @@ See `configs/config.example.yaml` for all configuration options. Key settings in
 - `web.enabled` - Enable Web admin UI (default: true)
 - `web.port` - Web UI HTTP port (8088 default)
 - `gb28181.enabled` - Register with a SIP platform (default: false)
-- `gb28181.transport` - SIP transport: `udp` or `tcp` (default: udp)
+- `gb28181.transport` - SIP transport: `udp`, `tcp` (inbound listener), `tcp-out` (device dials, redial), `tls`, or `tls-listen` (SIPS; the TLS pair under `tls_cert_file`/`tls_key_file`) (default: udp)
 - `recording.enabled` - Continuous local recording (default: false)
 - `recording.storage_path/segment_secs/retention_days/max_storage_mb` - Recording layout and pruning (default: `recordings` / 600 / 3 / 8192)
 - `ai.enabled` - NanoDet detection (default: false; requires a `-tags ai` build)
