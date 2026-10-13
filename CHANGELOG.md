@@ -15,7 +15,7 @@ Notable changes to MiBee Eye (Go implementation) are documented here.
 
 ### Added
 
-- **GB28181 transport parity package** (library pin `c9be9f0`):
+- **GB28181 transport parity package** (gb28181-go v0.12.0, onvif-go v2.5.0):
   catalog/record answers paginate over multiple MESSAGEs (A.2.6.1/4),
   negotiated REGISTER expiry, CANCEL handling, platform-silence
   detection and honest Subscription-State arrive automatically; new
