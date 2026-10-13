@@ -88,20 +88,53 @@ func (r recordingIndexAdapter) Root() string { return r.root }
 // toDeviceConfig converts the host config structs (YAML-facing) to the
 // device package's Config/DeviceInfo (field-identical).
 func toDeviceConfig(c config.GB28181Config) gbdev.Config {
-	return gbdev.Config{
-		Enabled:               c.Enabled,
-		PlatformSIPAddress:    c.PlatformSIPAddress,
-		PlatformSIPPort:       c.PlatformSIPPort,
-		DeviceID:              c.DeviceID,
-		ChannelID:             c.ChannelID,
-		SIPDomain:             c.SIPDomain,
-		Password:              c.Password,
-		LocalSIPPort:          c.LocalSIPPort,
-		RegisterIntervalSecs:  c.RegisterIntervalSecs,
-		HeartbeatIntervalSecs: c.HeartbeatIntervalSecs,
-		HeartbeatTimeoutCount: c.HeartbeatTimeoutCount,
-		Transport:             c.Transport,
+	cfg := gbdev.Config{
+		Enabled:                    c.Enabled,
+		PlatformSIPAddress:         c.PlatformSIPAddress,
+		PlatformSIPPort:            c.PlatformSIPPort,
+		DeviceID:                   c.DeviceID,
+		ChannelID:                  c.ChannelID,
+		SIPDomain:                  c.SIPDomain,
+		Password:                   c.Password,
+		LocalSIPPort:               c.LocalSIPPort,
+		RegisterIntervalSecs:       c.RegisterIntervalSecs,
+		HeartbeatIntervalSecs:      c.HeartbeatIntervalSecs,
+		HeartbeatTimeoutCount:      c.HeartbeatTimeoutCount,
+		Transport:                  c.Transport,
+		MulticastTTL:               c.MulticastTTL,
+		MaxSIPMessageSize:          c.MaxSIPMessageSize,
+		TLSCAFile:                  c.TLSCAFile,
+		TLSCertFile:                c.TLSCertFile,
+		TLSKeyFile:                 c.TLSKeyFile,
+		TLSInsecureSkipVerify:      c.TLSInsecureSkipVerify,
+		VideoParamOptDownloadSpeed: c.VideoParamOptDownloadSpeed,
+		VideoParamOptResolution:    c.VideoParamOptResolution,
 	}
+	if len(c.ExtraChannels) > 0 {
+		channels := make([]gbdev.ChannelItem, 0, len(c.ExtraChannels))
+		for _, ch := range c.ExtraChannels {
+			status := ch.Status
+			if status == "" {
+				status = "ON"
+			}
+			parent := ch.ParentID
+			if parent == "" {
+				parent = c.DeviceID
+			}
+			channels = append(channels, gbdev.ChannelItem{
+				DeviceID:     ch.DeviceID,
+				Name:         ch.Name,
+				Manufacturer: ch.Manufacturer,
+				Model:        ch.Model,
+				CivilCode:    ch.CivilCode,
+				Address:      ch.Address,
+				ParentID:     parent,
+				Status:       status,
+			})
+		}
+		cfg.ExtraChannels = channels
+	}
+	return cfg
 }
 
 func toDeviceInfo(d config.DeviceConfig) gbdev.DeviceInfo {

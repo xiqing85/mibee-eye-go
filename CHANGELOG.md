@@ -15,6 +15,16 @@ Notable changes to MiBee Eye (Go implementation) are documented here.
 
 ### Added
 
+- **GB28181 transport parity package** (library pin `c9be9f0`):
+  catalog/record answers paginate over multiple MESSAGEs (A.2.6.1/4),
+  negotiated REGISTER expiry, CANCEL handling, platform-silence
+  detection and honest Subscription-State arrive automatically; new
+  config keys `transport: tcp-out|tls|tls-listen` (SIPS transports,
+  `tls-listen` validated to require the cert/key pair), `tls_ca_file`
+  / `tls_cert_file` / `tls_key_file` / `tls_insecure_skip_verify`,
+  `multicast_ttl`, `extra_channels` (multi-channel catalog) and
+  `max_sip_message_size`; VideoParamOpt ConfigDownload strings pass
+  through.
 - **OTLP call-chain span export** (SPEC v1 §3.3 + appendix A #37): new
   `observability.otlp_endpoint` config key (default empty = noop tracer,
   zero cost). When set, spans export for HTTP requests (W3C traceparent

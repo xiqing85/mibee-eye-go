@@ -108,7 +108,7 @@ Linux 预编译产物（amd64 / arm64 / armv7）见
 - `web.enabled` - 启用 Web 管理界面（默认 true）
 - `web.port` - Web 界面 HTTP 端口（默认 8088）
 - `gb28181.enabled` - 向 SIP 平台注册（默认 false）
-- `gb28181.transport` - SIP 传输：`udp` 或 `tcp`（默认 udp）
+- `gb28181.transport` - SIP 传输：`udp`、`tcp`（入站监听）、`tcp-out`（设备外拨+断线重拨）、`tls`、`tls-listen`（SIPS；证书对见 `tls_cert_file`/`tls_key_file`）（默认 udp）
 - `recording.enabled` - 持续本地录制（默认 false）
 - `recording.storage_path/segment_secs/retention_days/max_storage_mb` - 录制目录与清理策略（默认：`recordings` / 600 / 3 / 8192）
 - `ai.enabled` - NanoDet 检测（默认 false；需 `-tags ai` 构建）

@@ -1025,3 +1025,50 @@ func TestObservabilityDefaultsAndParsing(t *testing.T) {
 		t.Errorf("env override = %q", cfg.Observability.OTLPEndpoint)
 	}
 }
+
+func TestGB28181Transport_StreamValuesAccepted(t *testing.T) {
+	for _, transport := range []string{"tcp-out", "tls", "tls-listen"} {
+		cfgYAML := "gb28181:\n  transport: \"" + transport + "\"\n"
+		if transport == "tls-listen" {
+			cfgYAML += "  tls_cert_file: \"/certs/device.pem\"\n  tls_key_file: \"/certs/device.key\"\n"
+		}
+		path := writeTempYAML(t, cfgYAML)
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatalf("transport %q: Load failed: %v", transport, err)
+		}
+		if cfg.GB28181.Transport != transport {
+			t.Errorf("transport %q: GB28181.Transport = %q", transport, cfg.GB28181.Transport)
+		}
+	}
+}
+
+func TestGB28181TLSListenRequiresCertPair(t *testing.T) {
+	cfgYAML := `
+gb28181:
+  transport: "tls-listen"
+`
+	path := writeTempYAML(t, cfgYAML)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error for tls-listen without cert/key, got nil")
+	}
+	if !strings.Contains(err.Error(), "tls_cert_file") {
+		t.Errorf("error should mention tls_cert_file, got: %v", err)
+	}
+}
+
+func TestGB28181MulticastTTLOutOfRange(t *testing.T) {
+	cfgYAML := `
+gb28181:
+  multicast_ttl: 300
+`
+	path := writeTempYAML(t, cfgYAML)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error for multicast_ttl=300, got nil")
+	}
+	if !strings.Contains(err.Error(), "multicast_ttl") {
+		t.Errorf("error should mention multicast_ttl, got: %v", err)
+	}
+}

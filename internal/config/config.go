@@ -187,7 +187,37 @@ type GB28181Config struct {
 	RegisterIntervalSecs  int    `yaml:"register_interval_secs"`  // SIP REGISTER interval (seconds)
 	HeartbeatIntervalSecs int    `yaml:"heartbeat_interval_secs"` // SIP keepalive heartbeat interval (seconds)
 	HeartbeatTimeoutCount int    `yaml:"heartbeat_timeout_count"` // Missed heartbeats before declaring timeout
-	Transport             string `yaml:"transport"`               // SIP transport: udp (default) or tcp
+	// SIP transport: udp (default), tcp (inbound listener), tcp-out
+	// (device dials the platform, full lifecycle with redial), tls
+	// (SIPS outbound), or tls-listen (inbound SIPS; the platform dials
+	// the device — requires the TLS cert/key pair below).
+	Transport string `yaml:"transport"`
+
+	// MulticastTTL sets IP_MULTICAST_TTL on the media socket when the
+	// INVITE's media address is a multicast group (0 = OS default; the
+	// LAN default of 1 stays within one subnet).
+	MulticastTTL int `yaml:"multicast_ttl,omitempty"`
+	// ExtraChannels lists additional catalog channels (A.2.1): the
+	// device's own entry rides first, these follow — large lists page
+	// across MESSAGEs automatically.
+	ExtraChannels []ExtraChannel `yaml:"extra_channels,omitempty"`
+	// MaxSIPMessageSize bounds one Content-Length framed message on the
+	// TCP/TLS read path (0 = library default 1 MiB).
+	MaxSIPMessageSize int `yaml:"max_sip_message_size,omitempty"`
+
+	// SIPS transports (Transport "tls"/"tls-listen" only). The GB
+	// convention is a self-signed CA whose serial is the device/platform
+	// ID; the operator provisions the files.
+	TLSCAFile             string `yaml:"tls_ca_file,omitempty"`              // CA (or the platform's self-signed cert) used to verify the platform
+	TLSCertFile           string `yaml:"tls_cert_file,omitempty"`            // device certificate (tls-listen server side; mutual-auth client side)
+	TLSKeyFile            string `yaml:"tls_key_file,omitempty"`             // device certificate key
+	TLSInsecureSkipVerify bool   `yaml:"tls_insecure_skip_verify,omitempty"` // accept any platform cert (lab only)
+
+	// ConfigDownload VideoParamOpt block (A.2.1.20): download speeds and
+	// supported resolutions as "/"-joined strings (e.g. "1/2/4",
+	// "1920x1080/640x480"). Empty omits the block from answers.
+	VideoParamOptDownloadSpeed string `yaml:"video_param_opt_download_speed,omitempty"`
+	VideoParamOptResolution    string `yaml:"video_param_opt_resolution,omitempty"`
 
 	// GB35114 opts into GB 35114 A-level security for the REGISTER
 	// lifecycle. Requires a binary built with `-tags gb35114` and
@@ -210,6 +240,19 @@ type GB28181Config struct {
 	// must be set to install the position source.
 	Longitude string `yaml:"longitude"`
 	Latitude  string `yaml:"latitude"`
+}
+
+// ExtraChannel is one additional catalog channel (A.2.1): status
+// defaults to ON when empty; the device's own entry always rides first.
+type ExtraChannel struct {
+	DeviceID     string `yaml:"device_id"`    // Channel ID (20 digits)
+	Name         string `yaml:"name"`         // Human-readable channel name
+	Manufacturer string `yaml:"manufacturer"` // Optional vendor
+	Model        string `yaml:"model"`        // Optional model
+	CivilCode    string `yaml:"civil_code"`   // Optional administrative region
+	Address      string `yaml:"address"`      // Optional installation address
+	ParentID     string `yaml:"parent_id"`    // Defaults to the device ID
+	Status       string `yaml:"status"`       // ON/OFF; empty = ON
 }
 
 // GB35114Config holds GB 35114 A-level security settings. When enabled,
@@ -599,7 +642,7 @@ var (
 	errMustBePositive   = errors.New("must be positive")
 	errInvalidCodec     = errors.New("codec must be h264 or h265")
 	errInvalidLogLevel  = errors.New("level must be debug, info, warn, or error")
-	errInvalidTransport = errors.New("gb28181 transport must be udp or tcp")
+	errInvalidTransport = errors.New("gb28181 transport must be udp, tcp, tcp-out, tls, or tls-listen")
 )
 
 // Validate checks all config fields and returns a detailed error if any are invalid.
@@ -726,12 +769,22 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("config.snapshot.quality: must be between 0 and 100, got %d", c.Snapshot.Quality)
 	}
 	switch c.GB28181.Transport {
-	case "udp", "tcp":
+	case "udp", "tcp", "tcp-out", "tls", "tls-listen":
 		// valid
 	case "":
 		c.GB28181.Transport = "udp"
 	default:
 		return fmt.Errorf("config.gb28181.transport: %w", errInvalidTransport)
+	}
+	// Inbound SIPS terminates TLS on the device — a listener without a
+	// cert/key pair cannot serve a single session. Outbound tls fails
+	// at dial time in the library (CA or insecure required); validated
+	// there so lab one-file setups keep working.
+	if c.GB28181.Transport == "tls-listen" && (c.GB28181.TLSCertFile == "" || c.GB28181.TLSKeyFile == "") {
+		return fmt.Errorf("config.gb28181: tls-listen requires tls_cert_file and tls_key_file")
+	}
+	if c.GB28181.MulticastTTL < 0 || c.GB28181.MulticastTTL > 255 {
+		return fmt.Errorf("config.gb28181.multicast_ttl: must be 0-255, got %d", c.GB28181.MulticastTTL)
 	}
 	// GB35114 A-level replaces Digest auth, so the Digest password is not
 	// required when it is enabled.
