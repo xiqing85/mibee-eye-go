@@ -7,7 +7,3 @@
 - [CONTRIBUTING.md](../CONTRIBUTING.md) — 开发环境、代码风格、提交规范、项目结构、同步发布规范
 - [roadmap-v0.3.0.md](roadmap-v0.3.0.md) — 下一个同步版本 v0.3.0 范围：GB/T 28181-2022 设备侧能力全覆盖
 - [SECURITY.md](../SECURITY.md) — 安全漏洞上报流程
-
-面向用户的中文部署手册另见
-[mlsbs.top 文档站](https://www.mlsbs.top/docs/mibeecam)（与仓库 README
-内容独立维护）。
