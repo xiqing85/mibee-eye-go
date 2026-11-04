@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"github.com/xiqing85/mibee-eye-go/internal/thermal"
 	"log/slog"
 	"os"
 	"strconv"
@@ -306,6 +307,7 @@ type Config struct {
 	GB28181       GB28181Config       `yaml:"gb28181"`
 	Recording     RecordingConfig     `yaml:"recording"`
 	AI            AIConfig            `yaml:"ai"`
+	Thermal       thermal.Config      `yaml:"thermal"`
 }
 
 // DefaultConfig returns a Config with all default values.
@@ -399,6 +401,12 @@ func DefaultConfig() *Config {
 		HLS: HLSConfig{
 			Enabled:         false,
 			SegmentDuration: 2 * time.Second,
+		},
+		Thermal: thermal.Config{
+			Enabled:    false,
+			Bus:        thermal.BusSpec{Type: "auto"},
+			Addr:       0x33,
+			Emissivity: 1.0,
 		},
 		GB28181: GB28181Config{
 			Enabled:               false,

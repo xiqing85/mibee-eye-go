@@ -4,11 +4,13 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/xiqing85/mibee-eye-go/internal/thermal"
 	"log"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -699,6 +701,24 @@ func main() {
 		return nil
 	}
 
+	// Thermal side sensor (SPEC §3.7): MLX90640 radiometric readings for
+	// dual-spectrum devices. The hardware overlay (written by the web
+	// hardware card) overrides bus/address from discovery runs. Fail-open:
+	// a missing module keeps the subsystem in warmup — endpoints answer
+	// honestly with trusted:false instead of taking the camera down.
+	var thermalSvc *thermal.Service
+	if cfg.Thermal.Enabled {
+		overlayPath := filepath.Join(filepath.Dir(*configPath), "thermal-hardware.yaml")
+		thermalCfg := cfg.Thermal
+		if t := thermal.LoadOverlay(overlayPath); t != nil {
+			slog.Info("thermal: hardware overlay applied", "path", overlayPath)
+			thermalCfg.Bus = t.Bus
+			thermalCfg.Addr = t.Addr
+		}
+		thermalSvc = thermal.NewService(&thermalCfg)
+		thermalSvc.SetPersistPath(overlayPath)
+	}
+
 	var webServer *web.Server
 	// --- Step 5.5: Web UI Server ---
 	if cfg.Web.Enabled {
@@ -726,6 +746,7 @@ func main() {
 			IdleTimeout:       cfg.Web.IdleTimeout,
 			Snapshot:          snapshotBuffer,
 			Metrics:           metricsCollector,
+			Thermal:           thermalSvc,
 		})
 		// SPEC v1 §6 `alarm` SSE: the GB28181 alarm bridge's accepted
 		// rising edges also reach the web event hub (web disabled → no
@@ -741,6 +762,24 @@ func main() {
 					"timestamp": nowMs,
 				})
 			})
+		}
+		// Thermal poll loop + SSE pump (SPEC §3.7): readings broadcast on a
+		// ≥1 s cadence; the poll loop owns the bus between scan sweeps.
+		if thermalSvc != nil {
+			go thermalSvc.Run(ctx)
+			pump := thermalSvc
+			go func() {
+				t := time.NewTicker(time.Second)
+				defer t.Stop()
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					case <-t.C:
+						webServer.BroadcastEvent("thermal.temperature", pump.Payload(false))
+					}
+				}
+			}()
 		}
 		// Observability (SPEC §3.2): resource snapshot sampler + log ring.
 		go webServer.Observe().RunSampler(ctx, 2*time.Second)

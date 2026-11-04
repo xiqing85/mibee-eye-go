@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/xiqing85/mibee-eye-go/internal/thermal"
 	"log"
 	"net"
 	"net/http"
@@ -55,6 +56,9 @@ type Config struct {
 	FrameRate     func() float64 // returns current fps (nil = unavailable)
 	Snapshot      http.Handler   // GET /snapshot handler (nil = disabled)
 	Metrics       http.Handler   // GET /metrics handler (nil = disabled; SPEC §3.2)
+	// Thermal side sensor (SPEC §3.7; nil = disabled → thermal endpoints
+	// stay unregistered and the capability key is absent).
+	Thermal *thermal.Service
 }
 
 // Server is the web UI HTTP server.
@@ -284,6 +288,16 @@ func (s *Server) registerRoutes() {
 	}
 	if s.cfg.Snapshot != nil {
 		m.HandleFunc("GET /snapshot", s.cfg.Snapshot.ServeHTTP)
+	}
+	// Thermal extension (SPEC §3.7) — nil-gated: absent subsystem keeps
+	// the endpoints unregistered (404) and the capability key absent.
+	if s.cfg.Thermal != nil {
+		m.HandleFunc("GET /api/thermal/current", s.authRequired(s.handleThermalCurrent))
+		m.HandleFunc("GET /api/thermal/snapshot", s.authRequired(s.handleThermalSnapshot))
+		m.HandleFunc("GET /api/hardware", s.authRequired(s.handleHardwareGet))
+		m.HandleFunc("GET /api/hardware/scan", s.authRequired(s.handleHardwareScanGet))
+		m.HandleFunc("POST /api/hardware/scan", s.authRequired(s.handleHardwareScanPost))
+		m.HandleFunc("PUT /api/hardware/config", s.authRequired(s.handleHardwareConfigPut))
 	}
 }
 
