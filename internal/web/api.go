@@ -111,6 +111,20 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.AI != nil && s.cfg.AI.Active() {
 		events = append(events, "alarm")
 	}
+	// SPEC §3.7 thermal: readings + hardware bring-up only when the side
+	// sensor subsystem actually runs; `available` follows the first
+	// trusted frame (absent key = not a thermal device).
+	var thermalCap map[string]interface{}
+	if s.cfg.Thermal != nil {
+		thermalCap = map[string]interface{}{
+			"available":   s.cfg.Thermal.Available(),
+			"radiometric": s.cfg.Thermal.Radiometric(),
+			"max_fps":     8.0,
+			"rules":       0,
+			"hardware":    true,
+		}
+		events = append(events, "thermal.temperature")
+	}
 	caps := map[string]interface{}{
 		"spec_version":      "1",
 		"auth":              map[string]interface{}{"model": "session", "setup": true},
@@ -144,6 +158,9 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 			"logs":     true,
 			"requests": true,
 		},
+	}
+	if thermalCap != nil {
+		caps["thermal"] = thermalCap
 	}
 	device := map[string]interface{}{"name": "MiBee Eye"}
 	if oc != nil {
