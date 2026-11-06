@@ -23,15 +23,16 @@ type Collector struct {
 	aiInferences   uint64
 	// GB28181 lifecycle counters (library metrics.Hooks seam, SPEC
 	// appendix A #38).
-	gbRegisterAttempts uint64
-	gbRegisterOK       uint64
-	gbRegisterFail     uint64
-	gbKeepaliveFail    uint64
-	gbInviteStarted    uint64
-	gbInviteStopped    uint64
-	gbInviteFail       uint64
-	gbPSBytesOut       uint64
-	rtspSessions       uint64
+	gbRegisterAttempts    uint64
+	gbRegisterOK          uint64
+	gbRegisterFail        uint64
+	gbKeepaliveFail       uint64
+	gb35114AUVerifyFailed uint64
+	gbInviteStarted       uint64
+	gbInviteStopped       uint64
+	gbInviteFail          uint64
+	gbPSBytesOut          uint64
+	rtspSessions          uint64
 	// Resource gauges (SPEC appendix A #38): pushed by the periodic
 	// sampler — the same numbers /api/metrics/summary serves.
 	sysCPUPercent   float64
@@ -138,10 +139,18 @@ func (c *Collector) IncRTSPSession() {
 // The GB28181 metrics.Hooks seam (library issue #40). Each maps 1:1 to a
 // Prometheus series below; keep them cheap — PSBytesOut fires per media
 // packet.
-func (c *Collector) RegisterAttempt()      { c.mu.Lock(); c.gbRegisterAttempts++; c.mu.Unlock() }
-func (c *Collector) RegisterOK()           { c.mu.Lock(); c.gbRegisterOK++; c.mu.Unlock() }
-func (c *Collector) RegisterFail()         { c.mu.Lock(); c.gbRegisterFail++; c.mu.Unlock() }
-func (c *Collector) KeepaliveFail()        { c.mu.Lock(); c.gbKeepaliveFail++; c.mu.Unlock() }
+func (c *Collector) RegisterAttempt() { c.mu.Lock(); c.gbRegisterAttempts++; c.mu.Unlock() }
+func (c *Collector) RegisterOK()      { c.mu.Lock(); c.gbRegisterOK++; c.mu.Unlock() }
+func (c *Collector) RegisterFail()    { c.mu.Lock(); c.gbRegisterFail++; c.mu.Unlock() }
+func (c *Collector) KeepaliveFail()   { c.mu.Lock(); c.gbKeepaliveFail++; c.mu.Unlock() }
+
+// GB35114AUVerifyFailed counts dropped media access units whose
+// signature was missing or failed verification (gb28181-go metrics.Hooks).
+func (c *Collector) GB35114AUVerifyFailed(channelID string) {
+	c.mu.Lock()
+	c.gb35114AUVerifyFailed++
+	c.mu.Unlock()
+}
 func (c *Collector) InviteSessionStarted() { c.mu.Lock(); c.gbInviteStarted++; c.mu.Unlock() }
 func (c *Collector) InviteSessionStopped() { c.mu.Lock(); c.gbInviteStopped++; c.mu.Unlock() }
 func (c *Collector) InviteFail()           { c.mu.Lock(); c.gbInviteFail++; c.mu.Unlock() }
@@ -183,6 +192,7 @@ func (c *Collector) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	gbRegisterOK := c.gbRegisterOK
 	gbRegisterFail := c.gbRegisterFail
 	gbKeepaliveFail := c.gbKeepaliveFail
+	gb35114AUVerifyFailed := c.gb35114AUVerifyFailed
 	gbInviteStarted := c.gbInviteStarted
 	gbInviteStopped := c.gbInviteStopped
 	gbInviteFail := c.gbInviteFail
@@ -244,6 +254,8 @@ func (c *Collector) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, "# HELP mibee_eye_gb28181_keepalive_fail_total Total failed keepalive messages\n")
 	fmt.Fprint(w, "# TYPE mibee_eye_gb28181_keepalive_fail_total counter\n")
 	fmt.Fprintf(w, "mibee_eye_gb28181_keepalive_fail_total %d\n", gbKeepaliveFail)
+	fmt.Fprint(w, "# HELP mibee_eye_gb28181_gb35114_au_verify_failed_total Total GB35114 media AUs dropped by failed signature verification\n")
+	fmt.Fprintf(w, "# TYPE mibee_eye_gb28181_gb35114_au_verify_failed_total counter\nmibee_eye_gb28181_gb35114_au_verify_failed_total %d\n", gb35114AUVerifyFailed)
 	fmt.Fprint(w, "# HELP mibee_eye_gb28181_invite_sessions_started_total Total INVITE media sessions confirmed\n")
 	fmt.Fprint(w, "# TYPE mibee_eye_gb28181_invite_sessions_started_total counter\n")
 	fmt.Fprintf(w, "mibee_eye_gb28181_invite_sessions_started_total %d\n", gbInviteStarted)
