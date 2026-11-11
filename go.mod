@@ -8,7 +8,7 @@ require (
 	github.com/bluenviron/gortsplib/v5 v5.5.3
 	github.com/bluenviron/mediacommon/v2 v2.8.3
 	github.com/google/uuid v1.6.0
-	github.com/mickeyzzc/gb28181-go v0.15.2
+	github.com/mickeyzzc/gb28181-go v0.16.0
 	github.com/mickeyzzc/onvif-go/v2 v2.7.6
 	github.com/pion/rtp v1.10.2
 	github.com/yalue/onnxruntime_go v1.31.0

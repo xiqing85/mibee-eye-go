@@ -370,6 +370,21 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Masked-value guard: a literal "****" password means a masked GET →
+	// PUT round-trip was written back to the config file verbatim (found on
+	// .118, 2026-11-11: both onvif and web passwords were the four
+	// asterisks, and the service cheerfully used them as real credentials).
+	// Warn loudly instead of failing: the operator may genuinely hold such
+	// a password, but nobody intends to.
+	for _, sec := range []struct{ name, password string }{
+		{"onvif.password", cfg.ONVIF.Password},
+		{"web.password", cfg.Web.Password},
+	} {
+		if sec.password == "****" {
+			slog.Warn("config password is the masked placeholder \"****\" — a masked config round-trip likely overwrote the real credential; set it explicitly (observed on .118, 2026-11-11)", "key", sec.name)
+		}
+	}
+
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 
