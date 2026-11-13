@@ -113,8 +113,28 @@ func TestThermalEndpointsPresent(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &caps); err != nil {
 		t.Fatal(err)
 	}
+	// Sensorless semantics (no sensor has answered on the bus in this
+	// test — the service never ran a poll pass): the thermal key must be
+	// ABSENT so sensorless hosts don't render ghost cards (.118, 2026-11-13).
+	if caps.Data.Thermal != nil {
+		t.Errorf("thermal cap without a bus answer = %+v, want absent", caps.Data.Thermal)
+	}
+	for _, e := range caps.Data.Events {
+		if e == "thermal.temperature" {
+			t.Error("thermal.temperature advertised without a bus answer")
+		}
+	}
+
+	// A successful scan sweep is a bus answer — the capability appears.
+	// Fake the latch (the sweep itself needs real hardware): same field the
+	// poll loop's EEPROM read sets.
+	svc.MarkSensorAnswered()
+	rec = doReq(t, s, "GET", "/api/capabilities", "", hdr)
+	if err := json.Unmarshal(rec.Body.Bytes(), &caps); err != nil {
+		t.Fatal(err)
+	}
 	if caps.Data.Thermal["hardware"] != true {
-		t.Errorf("thermal cap = %+v", caps.Data.Thermal)
+		t.Errorf("thermal cap after scan hit = %+v", caps.Data.Thermal)
 	}
 	found := false
 	for _, e := range caps.Data.Events {
@@ -123,7 +143,7 @@ func TestThermalEndpointsPresent(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Error("thermal.temperature not advertised in events")
+		t.Error("thermal.temperature not advertised after scan hit")
 	}
 }
 

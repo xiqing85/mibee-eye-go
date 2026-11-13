@@ -429,6 +429,18 @@ func (c *RPiCamVidCamera) buildArgs() []string {
 	if p.IDRPeriod > 0 {
 		args = append(args, "--intra", strconv.FormatUint(uint64(p.IDRPeriod), 10))
 	}
+	// AWB mode + fixed gains (camera.awb_mode / camera.awb_gains): ""/"auto"
+	// keeps the camera's own auto white balance; custom|manual pins the
+	// colour gains via --awbgains R,B (mixed-lighting scenes confuse auto
+	// AWB — warm cast on whites, .118).
+	if p.AWB != "" && p.AWB != "auto" {
+		args = append(args, "--awb", p.AWB)
+	}
+	if p.AWBGainRed > 0 && p.AWBGainBlue > 0 {
+		args = append(args, "--awbgains",
+			strconv.FormatFloat(float64(p.AWBGainRed), 'f', -1, 32)+","+
+				strconv.FormatFloat(float64(p.AWBGainBlue), 'f', -1, 32))
+	}
 	// 0°/180° bake via libcamera flips (--rotation/--hflip/--vflip); in
 	// yuv mode no transform flags reach rpicam-vid — readLoopYUV bakes
 	// rotation and flips in-process instead.
