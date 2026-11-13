@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -213,6 +214,20 @@ func buildCameraFromConfig(cfg *config.Config, subTap func(frame []byte, w, h ui
 	cameraParams.Contrast = float32(cfg.Camera.Contrast)
 	cameraParams.Saturation = float32(cfg.Camera.Saturation)
 	cameraParams.Sharpness = float32(cfg.Camera.Sharpness)
+	// AWB mode + fixed gains (camera.awb_mode / camera.awb_gains): the
+	// rpicamvid backend bakes them into the subprocess args. Empty mode =
+	// the camera's own auto AWB; custom|manual with "R,B" gains pins the
+	// colour gains (mixed-lighting scenes confuse auto AWB — .118).
+	cameraParams.AWB = cfg.Camera.AWBMode
+	if g := cfg.Camera.AWBGains; g != "" {
+		parts := strings.Split(g, ",")
+		if len(parts) == 2 {
+			r, _ := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
+			b, _ := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+			cameraParams.AWBGainRed = float32(r)
+			cameraParams.AWBGainBlue = float32(b)
+		}
+	}
 	cameraParams.IDRPeriod = uint32(cfg.Camera.IDRPeriod)
 	cameraParams.Codec = "hardwareH264"
 	// Device-level flips from config: baked into the encoded stream by the
@@ -791,6 +806,12 @@ func main() {
 					case <-ctx.Done():
 						return
 					case <-t.C:
+						// A sensorless host (configured-but-absent module,
+						// e.g. a copied example config) must not push 1 Hz
+						// garbage — gate on the bus-answer latch.
+						if !pump.SensorPresent() {
+							continue
+						}
 						webServer.BroadcastEvent("thermal.temperature", pump.Payload(false))
 					}
 				}

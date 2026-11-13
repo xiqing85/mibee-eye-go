@@ -260,6 +260,27 @@ func (s *Service) Available() bool {
 	return s.state.Trusted
 }
 
+// MarkSensorAnswered latches the bus-answer flag (a successful scan sweep
+// hit is as good as the poll loop's EEPROM read).
+func (s *Service) MarkSensorAnswered() {
+	s.mu.Lock()
+	s.haveEE = true
+	s.mu.Unlock()
+}
+
+// SensorPresent reports whether a MLX90640 has ever answered on the bus
+// (EEPROM read latched). A configured-but-absent sensor stays false forever
+// — the honest "is this a thermal device" signal for capability
+// advertisement: ghost cards must not render on sensorless hosts (found on
+// .118, 2026-11-13: a copied [thermal] config section advertised
+// hardware:true with no sensor attached, rendering both thermal cards
+// against 404 endpoints).
+func (s *Service) SensorPresent() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.haveEE || s.state.Trusted
+}
+
 // Radiometric reports whether any real frame was ever decoded.
 func (s *Service) Radiometric() bool {
 	s.mu.RLock()
@@ -447,6 +468,14 @@ func (s *Service) scanSweep(cands [][2]uint32) ([]Hit, []string, *string) {
 			}
 			hits = append(hits, found...)
 		}
+	}
+	// A scan hit is a bus answer — same latch the poll loop sets via the
+	// EEPROM read, so the capability appears for a sensor found by the
+	// hardware bring-up card even before the first trusted frame.
+	if len(hits) > 0 {
+		s.mu.Lock()
+		s.haveEE = true
+		s.mu.Unlock()
 	}
 	return hits, pairErrs, nil
 }

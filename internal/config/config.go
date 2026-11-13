@@ -32,6 +32,8 @@ type CameraConfig struct {
 	Contrast        float64         `yaml:"contrast"`          // 0.0 to 32.0
 	Saturation      float64         `yaml:"saturation"`        // 0.0 to 32.0
 	Sharpness       float64         `yaml:"sharpness"`         // 0.0 to 16.0
+	AWBMode         string          `yaml:"awb_mode"`          // AWB algorithm: ""/auto (default), auto, indoor, incandescent, fluorescent, daylight, cloudy, custom, manual (rpicamvid mode; restart to apply)
+	AWBGains        string          `yaml:"awb_gains"`         // Fixed colour gains "R,B" (e.g. "1.8,1.5") — used with awb_mode: custom|manual; empty = camera default
 	IDRPeriod       int             `yaml:"idr_period"`        // Keyframe interval (1=every frame, 15=every 15th)
 	BinPath         string          `yaml:"bin_path"`          // Path to mtxrpicam binary
 	FFmpegBin       string          `yaml:"ffmpeg_bin"`        // ffmpeg binary (v4l2 fallback encoder, snapshot transcode)
@@ -679,6 +681,26 @@ func (c *Config) Validate() error {
 	}
 	if c.Camera.Sharpness < 0.0 || c.Camera.Sharpness > 16.0 {
 		return fmt.Errorf("config.camera.sharpness: %w", fmt.Errorf("out of range [0.0, 16.0]"))
+	}
+	switch c.Camera.AWBMode {
+	case "", "auto", "indoor", "incandescent", "tungsten", "fluorescent", "daylight", "cloudy", "custom", "manual":
+	default:
+		return fmt.Errorf("config.camera.awb_mode: must be one of auto|indoor|incandescent|tungsten|fluorescent|daylight|cloudy|custom|manual, got %q", c.Camera.AWBMode)
+	}
+	if c.Camera.AWBGains != "" {
+		if c.Camera.AWBMode != "custom" && c.Camera.AWBMode != "manual" {
+			return fmt.Errorf("config.camera.awb_gains: requires awb_mode custom|manual, got awb_mode %q", c.Camera.AWBMode)
+		}
+		parts := strings.Split(c.Camera.AWBGains, ",")
+		if len(parts) != 2 {
+			return fmt.Errorf("config.camera.awb_gains: want \"R,B\" (e.g. \"1.8,1.5\"), got %q", c.Camera.AWBGains)
+		}
+		for _, p := range parts {
+			v, err := strconv.ParseFloat(strings.TrimSpace(p), 64)
+			if err != nil || v < 0.0 || v > 32.0 {
+				return fmt.Errorf("config.camera.awb_gains: gains out of range [0.0, 32.0] in %q", c.Camera.AWBGains)
+			}
+		}
 	}
 	switch c.Camera.Mode {
 	case "mtxrpicam", "rpicamvid", "rtsp", "v4l2":
