@@ -31,6 +31,15 @@ RestartSec=5
 # Camera access (rpicam-vid / /dev/video0).
 SupplementaryGroups=video
 NoNewPrivileges=true
+# --- SD-only zero-write sandbox (2026-11-13, user directive) ---
+# .118 has ONLY an SD card: the camera program must never write to it
+# (SD wear/freeze chain: undervoltage -> card hang -> watchdog reboot).
+# Kernel-enforced: whole hierarchy read-only except the configs dir
+# (user-triggered web-UI saves, KB-scale, never continuous). Even an
+# accidental recording.enabled flip cannot write. Keep this block on
+# every redeploy to .118.
+ProtectSystem=strict
+ReadWritePaths=/home/mickey/rpi3b-cam/configs
 
 [Install]
 WantedBy=multi-user.target
